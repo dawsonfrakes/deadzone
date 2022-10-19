@@ -73,32 +73,46 @@ std::vector<Token> tokenize(std::string input)
     return result;
 }
 
+// typedef'd so I can decide which type of value is returned in the future
+typedef int IntResult;
+
 // expect tokens to be in a specific order for things to work correctly
 struct Parser {
+    // TODO: switch to using a std::vector<Token>::iterator instead of an index and a reference
     const std::vector<Token>& tokens;
     size_t current_token = 0;
 
     void eat(TokenType expect) {
+        if (current_token >= tokens.size())
+            throw std::runtime_error(std::string(TokenTypeString[expect]) + " expected and not found. I ran out of input!");
         if (tokens[current_token].type != expect)
             throw std::runtime_error(std::string(TokenTypeString[tokens[current_token].type]) + " != " + TokenTypeString[expect]);
         ++current_token;
     }
 
-    int expr() {
-        const size_t left = current_token;
+    IntResult term() {
+        const size_t token = current_token;
         eat(integer);
-        const size_t op = current_token;
-        eat(plus);
-        const size_t right = current_token;
-        eat(integer);
+        return std::stoi(tokens[token].data.value());
+    }
 
-        return std::stoi(tokens[left].data.value()) + std::stoi(tokens[right].data.value());
+    IntResult expr() {
+        IntResult result = term();
+        const size_t op = current_token;
+        while (tokens[current_token].type == plus || tokens[current_token].type == minus) {
+            switch (tokens[current_token].type) {
+                case plus: eat(plus); result += term(); break;
+                case minus: eat(minus); result -= term(); break;
+            }
+        }
+
+        return result;
     }
 };
 
 int main()
 {
-    std::vector<Token> tokens = tokenize("22 + 5");
+    std::vector<Token> tokens = tokenize("22 + 5 - 10");
     Parser parser = {tokens};
     std::cout << "Parser result: " << parser.expr() << std::endl;
     std::cout << "Tokenizer result:" << std::endl;
