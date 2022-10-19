@@ -45,6 +45,9 @@ static const std::unordered_map<std::string, Token> keywords = {
     {"div", {div_integer}}
 };
 
+/// @brief Splits an input stream into parsable tokens
+/// @param input: a block of text
+/// @return A vector of tokens to be used by a parser
 std::vector<Token> tokenize(std::string input)
 {
     const size_t length = input.length();
@@ -65,12 +68,14 @@ std::vector<Token> tokenize(std::string input)
         }
         // identifers / keywords
         if (std::isalpha(input[pos]) or input[pos] == '_') {
-            char c;
-            size_t i = 0;
-            while (pos+i < length and (c = input.at(pos+i++)))
-                if (!(std::isalnum(c) or c == '_')) break;
+            size_t i = 1;
+            while (pos+i < length) {
+                const char &c = input.at(pos+i);
+                if (not (std::isalnum(c) or c == '_')) break;
+                ++i;
+            }
 
-            std::string word = input.substr(pos, i - 1);
+            std::string word = input.substr(pos, i);
             std::transform(word.begin(), word.end(), word.begin(), [](unsigned char c){ return std::tolower(c); });
             if (keywords.count(word)) {
                 result.push_back(keywords.at(word));
@@ -113,40 +118,38 @@ std::vector<Token> tokenize(std::string input)
     return result;
 }
 
-// typedef'd so I can decide which type of value is returned in the future
-typedef int IntResult;
+typedef int64_t ParserNumber;
 
-// expect tokens to be in a specific order for things to work correctly
+/// @brief Attempts to find meaning in a stream of tokens
 struct Parser {
-    // TODO: switch to using a std::vector<Token>::iterator instead of an index and a reference
-    const std::vector<Token>& tokens;
-    size_t current_token = 0;
+    std::vector<Token>::const_iterator current_token;
+    std::vector<Token>::const_iterator end_token;
 
     void eat(TokenType expect) {
-        if (current_token >= tokens.size())
+        if (current_token == end_token)
             throw std::runtime_error(std::string(TokenTypeString[expect]) + " expected and not found. I ran out of input!");
-        if (tokens[current_token].type != expect)
-            throw std::runtime_error(std::string(TokenTypeString[tokens[current_token].type]) + " != " + TokenTypeString[expect]);
+        if (current_token->type != expect)
+            throw std::runtime_error(std::string(TokenTypeString[current_token->type]) + " != " + TokenTypeString[expect]);
         ++current_token;
     }
 
-    IntResult factor() {
-        const size_t token = current_token;
-        if (tokens[token].type == integer) {
+    ParserNumber factor() {
+        const auto &token = *current_token;
+        if (token.type == integer) {
             eat(integer);
-            return std::stoi(tokens[token].data.value());
+            return std::stoi(token.data.value());
         }
 
         eat(lparen);
-        const IntResult result = expr();
+        const ParserNumber result = expr();
         eat(rparen);
         return result;
     }
 
-    IntResult term() {
-        IntResult result = factor();
+    ParserNumber term() {
+        ParserNumber result = factor();
         while (true) {
-            switch (tokens[current_token].type) {
+            switch (current_token->type) {
                 case mul: eat(mul); result *= factor(); continue;
                 case div_integer: eat(div_integer); result /= factor(); continue;
             }
@@ -156,10 +159,10 @@ struct Parser {
         return result;
     }
 
-    IntResult expr() {
-        IntResult result = term();
+    ParserNumber expr() {
+        ParserNumber result = term();
         while (true) {
-            switch (tokens[current_token].type) {
+            switch (current_token->type) {
                 case plus: eat(plus); result += term(); continue;
                 case minus: eat(minus); result -= term(); continue;
             }
@@ -172,11 +175,11 @@ struct Parser {
 
 int main()
 {
-    std::vector<Token> tokens = tokenize("7 - 8 div 4");
-    Parser parser = {tokens};
-    std::cout << "Parser result: " << parser.expr() << std::endl;
+    const std::vector<Token> tokens = tokenize("7 - 8 div 4");
     std::cout << "Tokenizer result:" << std::endl;
     for (const Token& t : tokens) {
         std::cout << "\tType: " << TokenTypeString[t.type] << (t.data ? "; Data: \"" : "") << t.data.value_or("") << (t.data ? "\"" : "") << std::endl;
     }
+    Parser parser = {tokens.begin(), tokens.end()};
+    std::cout << "Parser result: " << parser.expr() << std::endl;
 }
