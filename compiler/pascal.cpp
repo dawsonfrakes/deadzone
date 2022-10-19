@@ -45,15 +45,14 @@ struct Token {
     std::optional<std::string> data = std::nullopt;
 };
 
-static const std::unordered_map<std::string, Token> keywords = {
-    {"div", {div_integer}}
-};
-
 /// @brief Splits an input stream into parsable tokens
 /// @param input: a block of text
 /// @return A vector of tokens to be used by a parser
 std::vector<Token> tokenize(std::string input)
 {
+    const std::unordered_map<std::string, Token> keywords = {
+        {"div", {div_integer}}
+    };
     const size_t length = input.length();
     std::vector<Token> result;
     size_t pos = 0;
@@ -122,45 +121,47 @@ std::vector<Token> tokenize(std::string input)
     return result;
 }
 
-typedef int64_t ParserNumber;
-
-struct AST {
-    virtual ParserNumber visit() const = 0;
-};
-
-struct BinOp : AST {
-    std::shared_ptr<AST> left;
-    Token op;
-    std::shared_ptr<AST> right;
-
-    BinOp(std::shared_ptr<AST> left, Token op, std::shared_ptr<AST> right) : left(left), op(op), right(right) {}
-
-    ParserNumber visit() const {
-        switch (op.type) {
-            case plus: return left->visit() + right->visit();
-            case minus: return left->visit() - right->visit();
-            case mul: return left->visit() * right->visit();
-            case div_integer: return left->visit() / right->visit();
-            default: return -1;
-        }
-    }
-};
-
-struct Num : AST {
-    Token token;
-    ParserNumber value;
-
-    Num(Token token, ParserNumber value) : token(token), value(value) {}
-
-    ParserNumber visit() const {
-        return value;
-    }
-};
-
 /// @brief Searches for meaning in a stream of tokens
-struct Parser {
+class Parser {
     std::vector<Token>::const_iterator current_token;
     std::vector<Token>::const_iterator end_token;
+
+    typedef int64_t ParserNumber;
+
+#pragma region AST
+    struct AST {
+        virtual ParserNumber visit() const = 0;
+    };
+
+    struct BinOp : AST {
+        std::shared_ptr<AST> left;
+        Token op;
+        std::shared_ptr<AST> right;
+
+        BinOp(std::shared_ptr<AST> left, Token op, std::shared_ptr<AST> right) : left(left), op(op), right(right) {}
+
+        ParserNumber visit() const {
+            switch (op.type) {
+                case plus: return left->visit() + right->visit();
+                case minus: return left->visit() - right->visit();
+                case mul: return left->visit() * right->visit();
+                case div_integer: return left->visit() / right->visit();
+                default: return -1;
+            }
+        }
+    };
+
+    struct Num : AST {
+        Token token;
+        ParserNumber value;
+
+        Num(Token token, ParserNumber value) : token(token), value(value) {}
+
+        ParserNumber visit() const {
+            return value;
+        }
+    };
+#pragma endregion /* AST */
 
     void eat(TokenType expect) {
         if (current_token == end_token)
@@ -211,7 +212,11 @@ struct Parser {
         return node;
     }
 
+public:
+    Parser(std::vector<Token>::const_iterator start, std::vector<Token>::const_iterator end) : current_token(start), end_token(end) {}
+
     ParserNumber parse() {
+        // expr is currently our start symbol
         auto tree = expr();
         return tree->visit();
     }
@@ -224,6 +229,6 @@ int main()
     for (const Token& t : tokens) {
         std::cout << "\tType: " << TokenTypeString[t.type] << (t.data ? "; Data: \"" : "") << t.data.value_or("") << (t.data ? "\"" : "") << std::endl;
     }
-    Parser parser = {tokens.begin(), tokens.end()};
+    Parser parser(tokens.begin(), tokens.end());
     std::cout << "Parser result: " << parser.parse() << std::endl;
 }
