@@ -5,28 +5,44 @@
 //  I'm going to attempt to implement the interpreter described at https://ruslanspivak.com/lsbasi-part1.
 //  In theory this is step 1 to learning what I do and don't want in my system.
 
+#include <algorithm>
 #include <iostream>
-#include <vector>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 enum TokenType {
     id,
     plus,
     minus,
-    integer
+    mul,
+    div_integer,
+    div_float,
+    integer,
+    lparen,
+    rparen
 };
 
 const char *TokenTypeString[] = {
     "ID",
     "Plus",
     "Minus",
-    "Integer"
+    "Mul",
+    "DivInteger",
+    "DivFloat",
+    "Integer",
+    "LParen",
+    "RParen"
 };
 
 struct Token {
     TokenType type;
     std::optional<std::string> data = std::nullopt;
+};
+
+static const std::unordered_map<std::string, Token> keywords = {
+    {"div", {div_integer}}
 };
 
 std::vector<Token> tokenize(std::string input)
@@ -53,7 +69,15 @@ std::vector<Token> tokenize(std::string input)
             size_t i = 0;
             while (pos+i < length and (c = input.at(pos+i++)))
                 if (!(std::isalnum(c) or c == '_')) break;
-            result.push_back({id, input.substr(pos, i - 1)});
+
+            std::string word = input.substr(pos, i - 1);
+            std::transform(word.begin(), word.end(), word.begin(), [](unsigned char c){ return std::tolower(c); });
+            if (keywords.count(word)) {
+                result.push_back(keywords.at(word));
+            } else {
+                result.push_back({id, word});
+            }
+
             pos += i;
             continue;
         }
@@ -67,6 +91,22 @@ std::vector<Token> tokenize(std::string input)
                 result.push_back({minus});
                 ++pos;
             } continue;
+            case '*': {
+                result.push_back({mul});
+                ++pos;
+            } continue;
+            case '(': {
+                result.push_back({lparen});
+                ++pos;
+            } continue;
+            case ')': {
+                result.push_back({rparen});
+                ++pos;
+            } continue;
+            // case '/': {
+            //     result.push_back({div_float});
+            //     ++pos;
+            // } continue;
         }
         throw std::runtime_error(std::string("Symbol '") + input[pos] + "' not eligible for tokenization");
     }
@@ -90,20 +130,40 @@ struct Parser {
         ++current_token;
     }
 
-    IntResult term() {
+    IntResult factor() {
         const size_t token = current_token;
-        eat(integer);
-        return std::stoi(tokens[token].data.value());
+        if (tokens[token].type == integer) {
+            eat(integer);
+            return std::stoi(tokens[token].data.value());
+        }
+
+        eat(lparen);
+        const IntResult result = expr();
+        eat(rparen);
+        return result;
+    }
+
+    IntResult term() {
+        IntResult result = factor();
+        while (true) {
+            switch (tokens[current_token].type) {
+                case mul: eat(mul); result *= factor(); continue;
+                case div_integer: eat(div_integer); result /= factor(); continue;
+            }
+            break;
+        }
+
+        return result;
     }
 
     IntResult expr() {
         IntResult result = term();
-        const size_t op = current_token;
-        while (tokens[current_token].type == plus || tokens[current_token].type == minus) {
+        while (true) {
             switch (tokens[current_token].type) {
-                case plus: eat(plus); result += term(); break;
-                case minus: eat(minus); result -= term(); break;
+                case plus: eat(plus); result += term(); continue;
+                case minus: eat(minus); result -= term(); continue;
             }
+            break;
         }
 
         return result;
@@ -112,7 +172,7 @@ struct Parser {
 
 int main()
 {
-    std::vector<Token> tokens = tokenize("22 + 5 - 10");
+    std::vector<Token> tokens = tokenize("7 - 8 div 4");
     Parser parser = {tokens};
     std::cout << "Parser result: " << parser.expr() << std::endl;
     std::cout << "Tokenizer result:" << std::endl;
