@@ -4,9 +4,13 @@
 //  Andreas Kling made me think I should try it out again.
 //  I'm going to attempt to implement the interpreter described at https://ruslanspivak.com/lsbasi-part1.
 //  In theory this is step 1 to learning what I do and don't want in my system.
+// Dawson, 10/19/22:
+//  I've never used smart pointers before so my use is probably incorrect but it compiles and runs so w/e.
+//  I should also note Lex Fridman's love of C++ may have also contributed to me coming back to it after so long.
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -120,7 +124,40 @@ std::vector<Token> tokenize(std::string input)
 
 typedef int64_t ParserNumber;
 
-/// @brief Attempts to find meaning in a stream of tokens
+struct AST {
+    virtual ParserNumber visit() const = 0;
+};
+
+struct BinOp : AST {
+    std::shared_ptr<AST> left;
+    Token op;
+    std::shared_ptr<AST> right;
+
+    BinOp(std::shared_ptr<AST> left, Token op, std::shared_ptr<AST> right) : left(left), op(op), right(right) {}
+
+    ParserNumber visit() const {
+        switch (op.type) {
+            case plus: return left->visit() + right->visit();
+            case minus: return left->visit() - right->visit();
+            case mul: return left->visit() * right->visit();
+            case div_integer: return left->visit() / right->visit();
+            default: return -1;
+        }
+    }
+};
+
+struct Num : AST {
+    Token token;
+    ParserNumber value;
+
+    Num(Token token, ParserNumber value) : token(token), value(value) {}
+
+    ParserNumber visit() const {
+        return value;
+    }
+};
+
+/// @brief Searches for meaning in a stream of tokens
 struct Parser {
     std::vector<Token>::const_iterator current_token;
     std::vector<Token>::const_iterator end_token;
@@ -133,43 +170,50 @@ struct Parser {
         ++current_token;
     }
 
-    ParserNumber factor() {
+    std::shared_ptr<AST> factor() {
         const auto &token = *current_token;
         if (token.type == integer) {
             eat(integer);
-            return std::stoi(token.data.value());
+            return std::make_shared<Num>(Num{token, std::stoi(token.data.value())});
         }
 
         eat(lparen);
-        const ParserNumber result = expr();
+        const auto node = expr();
         eat(rparen);
-        return result;
+        return node;
     }
 
-    ParserNumber term() {
-        ParserNumber result = factor();
-        while (true) {
-            switch (current_token->type) {
-                case mul: eat(mul); result *= factor(); continue;
-                case div_integer: eat(div_integer); result /= factor(); continue;
+    std::shared_ptr<AST> term() {
+        auto node = factor();
+        while (current_token->type == mul or current_token->type == div_integer) {
+            const auto &token = *current_token;
+            switch (token.type) {
+                case mul: eat(mul); break;
+                case div_integer: eat(div_integer); break;
             }
-            break;
+            node = std::make_shared<BinOp>(BinOp{node, token, factor()});
         }
 
-        return result;
+        return node;
     }
 
-    ParserNumber expr() {
-        ParserNumber result = term();
-        while (true) {
-            switch (current_token->type) {
-                case plus: eat(plus); result += term(); continue;
-                case minus: eat(minus); result -= term(); continue;
+    std::shared_ptr<AST> expr() {
+        auto node = term();
+        while (current_token->type == plus or current_token->type == minus) {
+            const auto &token = *current_token;
+            switch (token.type) {
+                case plus: eat(plus); break;
+                case minus: eat(minus); break;
             }
-            break;
+            node = std::make_shared<BinOp>(BinOp{node, token, term()});;
         }
 
-        return result;
+        return node;
+    }
+
+    ParserNumber parse() {
+        auto tree = expr();
+        return tree->visit();
     }
 };
 
@@ -181,5 +225,5 @@ int main()
         std::cout << "\tType: " << TokenTypeString[t.type] << (t.data ? "; Data: \"" : "") << t.data.value_or("") << (t.data ? "\"" : "") << std::endl;
     }
     Parser parser = {tokens.begin(), tokens.end()};
-    std::cout << "Parser result: " << parser.expr() << std::endl;
+    std::cout << "Parser result: " << parser.parse() << std::endl;
 }
