@@ -55,27 +55,22 @@ std::vector<Token> tokenize(std::string input)
     };
     const size_t length = input.length();
     std::vector<Token> result;
-    size_t pos = 0;
-    while (pos < length) {
+    for (size_t pos = 0; pos < length; ++pos) {
         // skip whitespace
-        if (std::isspace(input[pos])) {
-            ++pos;
-            continue;
-        }
+        if (std::isspace(input[pos])) continue;
         // integers
         if (std::isdigit(input[pos])) {
             size_t read = 0;
             result.push_back({integer, std::to_string(std::stoi(input.substr(pos), &read))});
-            pos += read;
+            pos += read - 1;
             continue;
         }
         // identifers / keywords
         if (std::isalpha(input[pos]) or input[pos] == '_') {
-            size_t i = 1;
-            while (pos+i < length) {
+            size_t i;
+            for (i = 1; pos + i < length; ++i) {
                 const char &c = input.at(pos+i);
                 if (not (std::isalnum(c) or c == '_')) break;
-                ++i;
             }
 
             std::string word = input.substr(pos, i);
@@ -86,35 +81,17 @@ std::vector<Token> tokenize(std::string input)
                 result.push_back({id, word});
             }
 
-            pos += i;
+            pos += i - 1;
             continue;
         }
         // operators
         switch (input[pos]) {
-            case '+': {
-                result.push_back({plus});
-                ++pos;
-            } continue;
-            case '-': {
-                result.push_back({minus});
-                ++pos;
-            } continue;
-            case '*': {
-                result.push_back({mul});
-                ++pos;
-            } continue;
-            case '(': {
-                result.push_back({lparen});
-                ++pos;
-            } continue;
-            case ')': {
-                result.push_back({rparen});
-                ++pos;
-            } continue;
-            // case '/': {
-            //     result.push_back({div_float});
-            //     ++pos;
-            // } continue;
+            case '+': result.push_back({plus}); continue;
+            case '-': result.push_back({minus}); continue;
+            case '*': result.push_back({mul}); continue;
+            case '(': result.push_back({lparen}); continue;
+            case ')': result.push_back({rparen}); continue;
+            // case '/': result.push_back({div_float}); continue;
         }
         throw std::runtime_error(std::string("Symbol '") + input[pos] + "' not eligible for tokenization");
     }
