@@ -151,6 +151,21 @@ class Parser {
         }
     };
 
+    struct UnaryOp : AST {
+        Token op;
+        std::shared_ptr<AST> expr;
+
+        UnaryOp(Token op, std::shared_ptr<AST> expr) : op(op), expr(expr) {}
+
+        ParserNumber visit() const {
+            switch (op.type) {
+                case plus: return +expr->visit();
+                case minus: return -expr->visit();
+                default: return -1;
+            }
+        }
+    };
+
     struct Num : AST {
         Token token;
         ParserNumber value;
@@ -173,15 +188,24 @@ class Parser {
 
     std::shared_ptr<AST> factor() {
         const auto &token = *current_token;
-        if (token.type == integer) {
-            eat(integer);
-            return std::make_shared<Num>(Num{token, std::stoi(token.data.value())});
+        switch (token.type) {
+            case plus:
+            case minus: {
+                eat(token.type);
+                return std::make_shared<UnaryOp>(UnaryOp(token, factor()));
+            } break;
+            case integer: {
+                eat(integer);
+                return std::make_shared<Num>(Num{token, std::stoi(token.data.value())});
+            }
+            case lparen: {
+                eat(lparen);
+                const auto node = expr();
+                eat(rparen);
+                return node;
+            } break;
+            default: throw std::runtime_error("Failed to parse a factor");
         }
-
-        eat(lparen);
-        const auto node = expr();
-        eat(rparen);
-        return node;
     }
 
     std::shared_ptr<AST> term() {
@@ -224,7 +248,7 @@ public:
 
 int main()
 {
-    const std::vector<Token> tokens = tokenize("7 - 8 div 4");
+    const std::vector<Token> tokens = tokenize("5 - - - + - (3 + 4) - +2");
     std::cout << "Tokenizer result:" << std::endl;
     for (const Token& t : tokens) {
         std::cout << "\tType: " << TokenTypeString[t.type] << (t.data ? "; Data: \"" : "") << t.data.value_or("") << (t.data ? "\"" : "") << std::endl;
