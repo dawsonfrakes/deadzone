@@ -111,10 +111,15 @@ AKRenderer renderer_init(const AKWindow *const window)
             vkGetPhysicalDeviceSurfaceSupportKHR(result.data.physical_device, i, result.data.surface, &present_supported);
             if (present_supported)
                 result.data.present_queue_family_index = i;
+
+            if (result.data.graphics_queue_family_index != nullopt && result.data.present_queue_family_index != nullopt)
+                goto findQueueFamiliesSuccess;
         }
         AKAssert(result.data.graphics_queue_family_index != nullopt);
         AKAssert(result.data.present_queue_family_index != nullopt);
     }
+    findQueueFamiliesSuccess:
+        ;
 
     // createLogicalDevice()
     const bool32 same_family = result.data.graphics_queue_family_index == result.data.present_queue_family_index;
@@ -241,10 +246,10 @@ AKRenderer renderer_init(const AKWindow *const window)
         {
             char *vertex_shader_src;
             const long vertex_shader_len = read_binary_file("vert.spv", &vertex_shader_src);
-            AKAssert(vertex_shader_len != -1);
+            AKAssert(vertex_shader_len != -1 && vertex_shader_len % 4 == 0);
             char *fragment_shader_src;
             const long fragment_shader_len = read_binary_file("frag.spv", &fragment_shader_src);
-            AKAssert(fragment_shader_len != -1);
+            AKAssert(fragment_shader_len != -1 && fragment_shader_len % 4 == 0);
 
             AKRenderer_VKCheck(vkCreateShaderModule(result.data.device, &(VkShaderModuleCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -454,12 +459,20 @@ static bool32 record_command_buffer(const AKRenderer *const renderer, VkCommandB
 
 void renderer_update(AKRenderer *const renderer)
 {
-    vkWaitForFences(renderer->data.device, 1, &renderer->data.in_flight_fence, VK_TRUE, UINT64_MAX);
-    vkResetFences(renderer->data.device, 1, &renderer->data.in_flight_fence);
+    if (vkWaitForFences(renderer->data.device, 1, &renderer->data.in_flight_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        printf("Failed to wait for in_flight_fence\n");
+        exit(EXIT_FAILURE);
+    }
+    if (vkResetFences(renderer->data.device, 1, &renderer->data.in_flight_fence) != VK_SUCCESS) {
+        printf("Failed to reset in_flight_fence\n");
+        exit(EXIT_FAILURE);
+    }
     u32 image_index;
     vkAcquireNextImageKHR(renderer->data.device, renderer->data.swapchain, UINT64_MAX, renderer->data.image_available_semaphore, VK_NULL_HANDLE, &image_index);
-    vkResetCommandBuffer(renderer->data.command_buffer, 0);
-    record_command_buffer(renderer, renderer->data.command_buffer, image_index);
+    if (!record_command_buffer(renderer, renderer->data.command_buffer, image_index)) {
+        printf("Failed to write a command buffer\n");
+        exit(EXIT_FAILURE);
+    }
     if (vkQueueSubmit(renderer->data.graphics_queue, 1, &(VkSubmitInfo) {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .waitSemaphoreCount = 1,
@@ -471,7 +484,7 @@ void renderer_update(AKRenderer *const renderer)
         .pSignalSemaphores = &renderer->data.render_complete_semaphore
     }, renderer->data.in_flight_fence) != VK_SUCCESS) {
         printf("Failed to submit to graphics queue\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     vkQueuePresentKHR(renderer->data.present_queue, &(VkPresentInfoKHR) {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
