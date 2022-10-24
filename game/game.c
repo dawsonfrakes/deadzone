@@ -1,4 +1,4 @@
-// 2>/dev/null; gcc -std=c99 -Wall -Wextra -pedantic $0 -lX11 -lvulkan && ./a.out; exit
+// 2>/dev/null; for FILE in shader.*; do glslc $FILE -o ${FILE##*.}.spv; done; gcc -std=c99 -Wall -Wextra -pedantic $0 -lX11 -lvulkan && ./a.out; exit
 // Dawson, 10/23/22:
 //  I had just thrown this together in C++ but it wouldn't let me do what I
 //  wanted with designated initializers and references to temporary rvalues,

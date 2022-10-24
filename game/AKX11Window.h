@@ -66,7 +66,7 @@ void window_update(AKWindow *const window)
             case Expose: {
                 window->width = ev.xexpose.width;
                 window->height = ev.xexpose.height;
-                printf("w:%d h:%d\n", ev.xexpose.width, ev.xexpose.height);
+                printf("Window(w=%d, h=%d)\n", ev.xexpose.width, ev.xexpose.height);
             } break;
             case KeyPress:
             case KeyRelease: {
@@ -98,4 +98,4 @@ void window_deinit(const AKWindow *const window)
     XCloseDisplay(window->data.dpy);
 }
 
-#endif
+#endif /* INCLUDE_SRC */
