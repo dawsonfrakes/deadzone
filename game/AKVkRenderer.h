@@ -2,6 +2,8 @@
 
 #include <vulkan/vulkan.h>
 
+#define MAX_FRAMES_IN_FLIGHT 2
+
 struct APISpecificData {
     VkInstance instance;
     VkPhysicalDevice physical_device;
@@ -23,10 +25,11 @@ struct APISpecificData {
     VkPipeline pipeline;
     VkFramebuffer framebuffers[10];
     VkCommandPool command_pool;
-    VkCommandBuffer command_buffer;
-    VkSemaphore image_available_semaphore;
-    VkSemaphore render_complete_semaphore;
-    VkFence in_flight_fence;
+    VkCommandBuffer command_buffers[MAX_FRAMES_IN_FLIGHT];
+    VkSemaphore image_available_semaphores[MAX_FRAMES_IN_FLIGHT];
+    VkSemaphore render_complete_semaphores[MAX_FRAMES_IN_FLIGHT];
+    VkFence in_flight_fences[MAX_FRAMES_IN_FLIGHT];
+    u32 current_frame;
 };
 
 #include "AKRenderer.h"
@@ -412,21 +415,23 @@ AKRenderer renderer_init(const AKWindow *const window)
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool = result.data.command_pool,
             .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1
-        }, &result.data.command_buffer));
+            .commandBufferCount = MAX_FRAMES_IN_FLIGHT
+        }, result.data.command_buffers));
     }
     // createSyncObjects()
     {
-        AKRenderer_VKCheck(vkCreateSemaphore(result.data.device, &(VkSemaphoreCreateInfo) {
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-        }, NULL, &result.data.image_available_semaphore));
-        AKRenderer_VKCheck(vkCreateSemaphore(result.data.device, &(VkSemaphoreCreateInfo) {
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-        }, NULL, &result.data.render_complete_semaphore));
-        AKRenderer_VKCheck(vkCreateFence(result.data.device, &(VkFenceCreateInfo) {
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            .flags = VK_FENCE_CREATE_SIGNALED_BIT
-        }, NULL, &result.data.in_flight_fence));
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            AKRenderer_VKCheck(vkCreateSemaphore(result.data.device, &(VkSemaphoreCreateInfo) {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+            }, NULL, result.data.image_available_semaphores+i));
+            AKRenderer_VKCheck(vkCreateSemaphore(result.data.device, &(VkSemaphoreCreateInfo) {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+            }, NULL, result.data.render_complete_semaphores+i));
+            AKRenderer_VKCheck(vkCreateFence(result.data.device, &(VkFenceCreateInfo) {
+                .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                .flags = VK_FENCE_CREATE_SIGNALED_BIT
+            }, NULL, result.data.in_flight_fences+i));
+        }
     }
 
     result.success = true;
@@ -459,49 +464,52 @@ static bool32 record_command_buffer(const AKRenderer *const renderer, VkCommandB
 
 void renderer_update(AKRenderer *const renderer)
 {
-    if (vkWaitForFences(renderer->data.device, 1, &renderer->data.in_flight_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+    if (vkWaitForFences(renderer->data.device, 1, &renderer->data.in_flight_fences[renderer->data.current_frame], VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
         printf("Failed to wait for in_flight_fence\n");
         exit(EXIT_FAILURE);
     }
-    if (vkResetFences(renderer->data.device, 1, &renderer->data.in_flight_fence) != VK_SUCCESS) {
+    if (vkResetFences(renderer->data.device, 1, &renderer->data.in_flight_fences[renderer->data.current_frame]) != VK_SUCCESS) {
         printf("Failed to reset in_flight_fence\n");
         exit(EXIT_FAILURE);
     }
     u32 image_index;
-    vkAcquireNextImageKHR(renderer->data.device, renderer->data.swapchain, UINT64_MAX, renderer->data.image_available_semaphore, VK_NULL_HANDLE, &image_index);
-    if (!record_command_buffer(renderer, renderer->data.command_buffer, image_index)) {
+    vkAcquireNextImageKHR(renderer->data.device, renderer->data.swapchain, UINT64_MAX, renderer->data.image_available_semaphores[renderer->data.current_frame], VK_NULL_HANDLE, &image_index);
+    if (!record_command_buffer(renderer, renderer->data.command_buffers[renderer->data.current_frame], image_index)) {
         printf("Failed to write a command buffer\n");
         exit(EXIT_FAILURE);
     }
     if (vkQueueSubmit(renderer->data.graphics_queue, 1, &(VkSubmitInfo) {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &renderer->data.image_available_semaphore,
+        .pWaitSemaphores = &renderer->data.image_available_semaphores[renderer->data.current_frame],
         .pWaitDstStageMask = (VkPipelineStageFlags []) {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
         .commandBufferCount = 1,
-        .pCommandBuffers = &renderer->data.command_buffer,
+        .pCommandBuffers = &renderer->data.command_buffers[renderer->data.current_frame],
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &renderer->data.render_complete_semaphore
-    }, renderer->data.in_flight_fence) != VK_SUCCESS) {
+        .pSignalSemaphores = &renderer->data.render_complete_semaphores[renderer->data.current_frame]
+    }, renderer->data.in_flight_fences[renderer->data.current_frame]) != VK_SUCCESS) {
         printf("Failed to submit to graphics queue\n");
         exit(EXIT_FAILURE);
     }
     vkQueuePresentKHR(renderer->data.present_queue, &(VkPresentInfoKHR) {
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &renderer->data.render_complete_semaphore,
+        .pWaitSemaphores = &renderer->data.render_complete_semaphores[renderer->data.current_frame],
         .swapchainCount = 1,
         .pSwapchains = &renderer->data.swapchain,
         .pImageIndices = &image_index
     });
+    renderer->data.current_frame = (renderer->data.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 void renderer_deinit(const AKRenderer *const renderer)
 {
     vkDeviceWaitIdle(renderer->data.device);
-    vkDestroyFence(renderer->data.device, renderer->data.in_flight_fence, NULL);
-    vkDestroySemaphore(renderer->data.device, renderer->data.render_complete_semaphore, NULL);
-    vkDestroySemaphore(renderer->data.device, renderer->data.image_available_semaphore, NULL);
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        vkDestroyFence(renderer->data.device, renderer->data.in_flight_fences[i], NULL);
+        vkDestroySemaphore(renderer->data.device, renderer->data.render_complete_semaphores[i], NULL);
+        vkDestroySemaphore(renderer->data.device, renderer->data.image_available_semaphores[i], NULL);
+    }
     vkDestroyCommandPool(renderer->data.device, renderer->data.command_pool, NULL);
     for (u32 i = 0; i < renderer->data.image_count; ++i)
         vkDestroyFramebuffer(renderer->data.device, renderer->data.framebuffers[i], NULL);
