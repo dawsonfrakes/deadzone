@@ -37,6 +37,24 @@ struct APISpecificData {
 
 #define AKRenderer_VKCheck(vkresult) if ((vkresult) != VK_SUCCESS) {return result;}
 
+#if defined(AK_USE_WIN32)
+#define AKRenderer_VKCreateSurface vkCreateWin32SurfaceKHR(result.data.instance, &(VkWin32SurfaceCreateInfoKHR) { \
+    .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR, \
+    .hwnd = window->data.hwnd, \
+    .hinstance = window->data.inst \
+}, NULL, &result.data.surface)
+static const char *const instance_extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
+#elif defined(AK_USE_XLIB)
+#define AKRenderer_VKCreateSurface vkCreateXlibSurfaceKHR(result.data.instance, &(VkXlibSurfaceCreateInfoKHR) { \
+    .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR, \
+    .dpy = window->data.dpy, \
+    .window = window->data.win \
+}, NULL, &result.data.surface)
+static const char *const instance_extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_XLIB_SURFACE_EXTENSION_NAME};
+#else
+#error Windowing system not supported by Vulkan renderer
+#endif
+
 AKRenderer renderer_init(const AKWindow *const window)
 {
     AKRenderer result = {
@@ -62,27 +80,13 @@ AKRenderer renderer_init(const AKWindow *const window)
         },
         .enabledLayerCount = 1,
         .ppEnabledLayerNames = (const char *const []) {"VK_LAYER_KHRONOS_validation"},
-        .enabledExtensionCount = 2,
-        .ppEnabledExtensionNames = (const char *const []) {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_XLIB_SURFACE_EXTENSION_NAME}
+        .enabledExtensionCount = LENGTH(instance_extensions),
+        .ppEnabledExtensionNames = instance_extensions
     }, NULL, &result.data.instance));
 
     // createSurface()
     {
-#if defined(AK_USE_WIN32)
-        AKRenderer_VKCheck(vkCreateWin32SurfaceKHR(result.data.instance, &(VkWin32SurfaceCreateInfoKHR) {
-            .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
-            .hwnd = window->data.hwnd,
-            .hinstance = window->data.inst
-        }, NULL, &result.data.surface));
-#elif defined(AK_USE_XLIB)
-        AKRenderer_VKCheck(vkCreateXlibSurfaceKHR(result.data.instance, &(VkXlibSurfaceCreateInfoKHR) {
-            .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
-            .dpy = window->data.dpy,
-            .window = window->data.win
-        }, NULL, &result.data.surface));
-#else
-#error Windowing system not supported by Vulkan renderer
-#endif
+        AKRenderer_VKCheck(AKRenderer_VKCreateSurface);
     }
 
     // selectPhysicalDevice()
@@ -130,7 +134,7 @@ AKRenderer renderer_init(const AKWindow *const window)
                     .queueFamilyIndex = result.data.present_queue_family_index,
                     .queueCount = 1,
                     .pQueuePriorities = (float []) {1.0f}
-                },
+                }
             },
             .pEnabledFeatures = &(VkPhysicalDeviceFeatures) {0},
             .enabledExtensionCount = 1,

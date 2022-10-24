@@ -4,6 +4,8 @@
 //  wanted with designated initializers and references to temporary rvalues,
 //  so I ditched it for good ole C. However, the structure of the program
 //  was easy to lay out in C++, so I attempted to copy that abstraction into C.
+// Dawson, 10/23/22:
+//  I should probably note the way I run these projects is with `sh game.c` so I can avoid using a make program.
 
 #define INCLUDE_SRC
 // NOTE: for debugging
@@ -29,9 +31,9 @@
 int main(void)
 {
     AKWindow window = window_init(800, 600);
-    if (!window.running) return 1;
+    if (!window.running) return EXIT_FAILURE;
     AKRenderer renderer = renderer_init(&window);
-    if (!renderer.success) return 1;
+    if (!renderer.success) return EXIT_FAILURE;
     while (window.running) {
         window_update(&window);
         if (window.keys[AKKEY_ESCAPE])
