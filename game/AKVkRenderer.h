@@ -7,6 +7,8 @@
 struct APISpecificData {
     VkInstance instance;
     VkPhysicalDevice physical_device;
+    VkPhysicalDeviceMemoryProperties mem_props;
+    VkPhysicalDeviceProperties props;
     optional_u32 graphics_queue_family_index;
     optional_u32 present_queue_family_index;
     VkDevice device;
@@ -84,7 +86,7 @@ static bool32 swapchain_init(AKRenderer *const renderer)
             .imageSharingMode = same_family ? VK_SHARING_MODE_EXCLUSIVE : VK_SHARING_MODE_CONCURRENT,
             .queueFamilyIndexCount = same_family ? 0 : 2,
             .pQueueFamilyIndices = (u32 []) {renderer->data.graphics_queue_family_index, renderer->data.present_queue_family_index},
-            .preTransform = renderer->data.surface_caps.currentTransform,
+            .preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
             .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
             .presentMode = renderer->data.present_mode,
             .clipped = VK_TRUE,
@@ -96,7 +98,7 @@ static bool32 swapchain_init(AKRenderer *const renderer)
         AKRenderer_VKCheck(vkGetSwapchainImagesKHR(renderer->data.device, renderer->data.swapchain, &renderer->data.image_count, NULL));
         // NOTE: image_count is only accurate from this point on, since vkGetSwapchainImagesKHR uses the previous value
         //       as a minimum and stores the final value into image_count
-        AKAssert(renderer->data.image_count <= 10);
+        AKAssert(renderer->data.image_count <= 10 && renderer->data.image_count > 0);
         AKRenderer_VKCheck(vkGetSwapchainImagesKHR(renderer->data.device, renderer->data.swapchain, &renderer->data.image_count, renderer->data.swapchain_images));
         printf("Swapchain(images_count=%d)\n", renderer->data.image_count);
     }
@@ -195,6 +197,8 @@ AKRenderer renderer_init(const AKWindow *const window)
         u32 count = 1;
         AKRenderer_VKCheck(vkEnumeratePhysicalDevices(result.data.instance, &count, &result.data.physical_device));
         AKAssert(count == 1);
+        vkGetPhysicalDeviceMemoryProperties(result.data.physical_device, &result.data.mem_props);
+        vkGetPhysicalDeviceProperties(result.data.physical_device, &result.data.props);
     }
     // selectSurfaceFormat()
     {
@@ -203,8 +207,12 @@ AKRenderer renderer_init(const AKWindow *const window)
         AKRenderer_VKCheck(vkGetPhysicalDeviceSurfaceFormatsKHR(result.data.physical_device, result.data.surface, &count, formats));
         AKAssert(count > 0);
         result.data.surface_format = formats[0];
+        if (count == 1 && formats[0].format == VK_FORMAT_UNDEFINED) {
+            result.data.surface_format.format = VK_FORMAT_B8G8R8A8_UNORM;
+            result.data.surface_format.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+        }
         for (u32 i = 0; i < count; ++i) {
-            if (formats[i].format == VK_FORMAT_B8G8R8A8_SRGB && formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            if (formats[i].format == VK_FORMAT_B8G8R8A8_UNORM && formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
                 result.data.surface_format = formats[i];
                 break;
             }
@@ -228,25 +236,31 @@ AKRenderer renderer_init(const AKWindow *const window)
         u32 count = 128;
         VkQueueFamilyProperties queue_family_props[128];
         vkGetPhysicalDeviceQueueFamilyProperties(result.data.physical_device, &count, queue_family_props);
+
         result.data.graphics_queue_family_index = nullopt;
-        result.data.present_queue_family_index = nullopt;
         for (u32 i = 0; i < count; ++i) {
-            if (queue_family_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+            if (queue_family_props[i].queueCount == 0)
+                continue;
+            if (queue_family_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
                 result.data.graphics_queue_family_index = i;
-
-            VkBool32 present_supported = VK_FALSE;
-            vkGetPhysicalDeviceSurfaceSupportKHR(result.data.physical_device, i, result.data.surface, &present_supported);
-            if (present_supported)
-                result.data.present_queue_family_index = i;
-
-            if (result.data.graphics_queue_family_index != nullopt && result.data.present_queue_family_index != nullopt)
-                goto findQueueFamiliesSuccess;
+                break;
+            }
         }
         AKAssert(result.data.graphics_queue_family_index != nullopt);
+
+        result.data.present_queue_family_index = nullopt;
+        for (u32 i = 0; i < count; ++i) {
+            if (queue_family_props[i].queueCount == 0)
+                continue;
+            VkBool32 present_supported = VK_FALSE;
+            vkGetPhysicalDeviceSurfaceSupportKHR(result.data.physical_device, i, result.data.surface, &present_supported);
+            if (present_supported) {
+                result.data.present_queue_family_index = i;
+                break;
+            }
+        }
         AKAssert(result.data.present_queue_family_index != nullopt);
     }
-    findQueueFamiliesSuccess:
-        ;
     // createLogicalDevice()
     {
         AKRenderer_VKCheck(vkCreateDevice(result.data.physical_device, &(VkDeviceCreateInfo) {
