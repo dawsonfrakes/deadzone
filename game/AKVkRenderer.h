@@ -1,5 +1,24 @@
 #pragma once
 
+#if defined(AK_USE_WIN32)
+#define VK_USE_PLATFORM_WIN32_KHR
+#define AKRenderer_VKCreateSurface vkCreateWin32SurfaceKHR(result.data.instance, &(VkWin32SurfaceCreateInfoKHR) { \
+    .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR, \
+    .hwnd = window->data.hwnd, \
+    .hinstance = window->data.inst \
+}, NULL, &result.data.surface)
+#define AKRenderer_VK_SURFACE_EXTENSION_NAME VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+#elif defined(AK_USE_XLIB)
+#define VK_USE_PLATFORM_XLIB_KHR
+#define AKRenderer_VKCreateSurface vkCreateXlibSurfaceKHR(result.data.instance, &(VkXlibSurfaceCreateInfoKHR) { \
+    .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR, \
+    .dpy = window->data.dpy, \
+    .window = window->data.win \
+}, NULL, &result.data.surface)
+#define AKRenderer_VK_SURFACE_EXTENSION_NAME VK_KHR_XLIB_SURFACE_EXTENSION_NAME
+#else
+#error Windowing system not supported by Vulkan renderer
+#endif
 #include <vulkan/vulkan.h>
 
 #define MAX_FRAMES_IN_FLIGHT 2
@@ -41,24 +60,6 @@ struct APISpecificData {
 #include "AKUtils.h"
 
 #define AKRenderer_VKCheck(vkresult) if ((vkresult) != VK_SUCCESS) {return result;}
-
-#if defined(AK_USE_WIN32)
-#define AKRenderer_VKCreateSurface vkCreateWin32SurfaceKHR(result.data.instance, &(VkWin32SurfaceCreateInfoKHR) { \
-    .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR, \
-    .hwnd = window->data.hwnd, \
-    .hinstance = window->data.inst \
-}, NULL, &result.data.surface)
-static const char *const instance_extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
-#elif defined(AK_USE_XLIB)
-#define AKRenderer_VKCreateSurface vkCreateXlibSurfaceKHR(result.data.instance, &(VkXlibSurfaceCreateInfoKHR) { \
-    .sType = VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR, \
-    .dpy = window->data.dpy, \
-    .window = window->data.win \
-}, NULL, &result.data.surface)
-static const char *const instance_extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_XLIB_SURFACE_EXTENSION_NAME};
-#else
-#error Windowing system not supported by Vulkan renderer
-#endif
 
 static bool32 swapchain_init(AKRenderer *const renderer)
 {
@@ -184,8 +185,8 @@ AKRenderer renderer_init(const AKWindow *const window)
         },
         .enabledLayerCount = 1,
         .ppEnabledLayerNames = (const char *const []) {"VK_LAYER_KHRONOS_validation"},
-        .enabledExtensionCount = LENGTH(instance_extensions),
-        .ppEnabledExtensionNames = instance_extensions
+        .enabledExtensionCount = 2,
+        .ppEnabledExtensionNames = (const char *const []) {VK_KHR_SURFACE_EXTENSION_NAME, AKRenderer_VK_SURFACE_EXTENSION_NAME}
     }, NULL, &result.data.instance));
 
     // createSurface()
@@ -469,7 +470,8 @@ static bool32 record_command_buffer(const AKRenderer *const renderer, VkCommandB
 {
     const bool32 result = false;
     AKRenderer_VKCheck(vkBeginCommandBuffer(buffer, &(VkCommandBufferBeginInfo) {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
     }));
     vkCmdBeginRenderPass(buffer, &(VkRenderPassBeginInfo) {
         .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,

@@ -1,4 +1,4 @@
-// 2>/dev/null; for FILE in shader.*; do glslc $FILE -o ${FILE##*.}.spv; done; gcc -std=c99 -Wall -Wextra -pedantic $0 -lX11 -lvulkan && ./a.out; exit
+// 2>/dev/null; for FILE in shader.*; do glslc $FILE -o ${FILE##*.}.spv; done; gcc -std=c99 -Wall -Wextra -pedantic $0 -lX11 -lvulkan -lm -D_POSIX_C_SOURCE=200809L && ./a.out; exit
 // Dawson, 10/23/22:
 //  I had just thrown this together in C++ but it wouldn't let me do what I
 //  wanted with designated initializers and references to temporary rvalues,
@@ -14,10 +14,8 @@
 
 #if defined(AK_USE_WIN32)
 #include "AKWin32Window.h"
-#define VK_USE_PLATFORM_WIN32_KHR
 #elif defined(AK_USE_XLIB)
 #include "AKX11Window.h"
-#define VK_USE_PLATFORM_XLIB_KHR
 #else
 #error No windowing system selected
 #endif
@@ -36,7 +34,7 @@ int main(void)
     if (!renderer.success) return EXIT_FAILURE;
     while (window.running) {
         window_update(&window);
-        if (window.keys[AKKEY_ESCAPE])
+        if (AKKEY_JUST_PRESSED(ESCAPE) || AKKEY_JUST_PRESSED(Q))
             window.running = false;
         renderer_update(&renderer);
     }

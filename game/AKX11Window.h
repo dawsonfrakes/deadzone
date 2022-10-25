@@ -56,9 +56,44 @@ AKWindow window_init(int width, int height)
     return result;
 }
 
+static const u16 KEYTABLE[AKKEY_LENGTH] = {
+    [AKKEY_A] = XK_a,XK_b,XK_c,XK_d,XK_e,XK_f,XK_g,XK_h,XK_i,XK_j,XK_k,XK_l,XK_m,
+                XK_n,XK_o,XK_p,XK_q,XK_r,XK_s,XK_t,XK_u,XK_v,XK_w,XK_x,XK_y,XK_z,
+    [AKKEY_0] = XK_0,XK_1,XK_2,XK_3,XK_4,XK_5,XK_6,XK_7,XK_8,XK_9,
+    [AKKEY_F1] = XK_F1,XK_F2,XK_F3,XK_F4,XK_F5,XK_F6,XK_F7,XK_F8,XK_F9,XK_F10,XK_F11,XK_F12,
+    [AKKEY_LEFTARROW] = XK_Left,
+    [AKKEY_DOWNARROW] = XK_Down,
+    [AKKEY_UPARROW] = XK_Up,
+    [AKKEY_RIGHTARROW] = XK_Right,
+    [AKKEY_BACKTICK] = XK_grave,
+    [AKKEY_TAB] = XK_Tab,
+    [AKKEY_CAPS] = XK_Caps_Lock,
+    [AKKEY_DELETE] = XK_Delete,
+    [AKKEY_ESCAPE] = XK_Escape,
+    [AKKEY_RETURN] = XK_Return,
+    [AKKEY_MINUS] = XK_minus,
+    [AKKEY_EQUALS] = XK_equal,
+    [AKKEY_PERIOD] = XK_period,
+    [AKKEY_COMMA] = XK_comma,
+    [AKKEY_SLASH] = XK_slash,
+    [AKKEY_BACKSLASH] = XK_backslash,
+    [AKKEY_SEMICOLON] = XK_semicolon,
+    [AKKEY_APOSTROPHE] = XK_apostrophe,
+    [AKKEY_LBRACKET] = XK_bracketleft,
+    [AKKEY_RBRACKET] = XK_bracketright,
+    [AKKEY_BACKSPACE] = XK_BackSpace,
+    [AKKEY_LCTRL] = XK_Control_L,
+    [AKKEY_LALT] = XK_Alt_L,
+    [AKKEY_LSHIFT] = XK_Shift_L,
+    [AKKEY_SPACE] = XK_space,
+    [AKKEY_RCTRL] = XK_Control_R,
+    [AKKEY_RALT] = XK_Alt_R,
+    [AKKEY_RSHIFT] = XK_Shift_R,
+};
+
 void window_update(AKWindow *const window)
 {
-    memcpy(window->keys_previous, window->keys, sizeof(window->keys)); // cpy prev to keys
+    memcpy(window->keys_previous, window->keys, sizeof(window->keys));
     while (XPending(window->data.dpy) > 0) {
         XEvent ev;
         XNextEvent(window->data.dpy, &ev);
@@ -72,8 +107,11 @@ void window_update(AKWindow *const window)
             case KeyRelease: {
                 const KeySym sym = XLookupKeysym(&ev.xkey, 0);
                 const u8 pressed = ev.type == KeyPress;
-                switch (sym) {
-                    case XK_Escape: window->keys[AKKEY_ESCAPE] = pressed; break;
+                for (usize i = 0; i < AKKEY_LENGTH; ++i) {
+                    if (KEYTABLE[i] == sym) {
+                        window->keys[i] = pressed;
+                        break;
+                    }
                 }
             } break;
             case MappingNotify: {
