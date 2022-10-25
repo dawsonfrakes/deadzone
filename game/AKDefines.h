@@ -21,5 +21,8 @@ typedef uint32_t bool32;
 #define nullopt -1
 typedef i64 optional_u32;
 
+#define MIN(A, B) ((A) < (B) ? (A) : (B))
+#define MAX(A, B) ((A) > (B) ? (A) : (B))
+#define CLAMP(V, LOW, HIGH) MIN(MAX(V, LOW), HIGH)
 #define LENGTH(ARRAY) (sizeof(ARRAY)/sizeof((ARRAY)[0]))
 #define AKAssert(check) if (!(check)) {return result;}

@@ -69,7 +69,7 @@ static bool32 swapchain_init(AKRenderer *const renderer)
     }
     // createSwapchain()
     {
-        renderer->data.image_count = renderer->data.surface_caps.minImageCount + 1;
+        renderer->data.image_count = MAX(renderer->data.surface_caps.minImageCount, MAX_FRAMES_IN_FLIGHT);
         if (renderer->data.surface_caps.maxImageCount > 0 && renderer->data.image_count > renderer->data.surface_caps.maxImageCount) {
             renderer->data.image_count = renderer->data.surface_caps.maxImageCount;
         }
