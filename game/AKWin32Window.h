@@ -9,7 +9,7 @@ struct PlatformSpecificData {
 
 #include "AKWindow.h"
 
-AKWindow window_init(int width, int height)
+AKWindow window_init(i32 width, i32 height)
 {
 
 }

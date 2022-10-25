@@ -18,7 +18,7 @@ struct PlatformSpecificData {
 #include <string.h>
 #include <X11/keysym.h>
 
-AKWindow window_init(int width, int height)
+AKWindow window_init(i32 width, i32 height)
 {
     AKWindow result = {
         .width = width,

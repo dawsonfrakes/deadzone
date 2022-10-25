@@ -23,13 +23,13 @@ typedef enum AKKeys {
 #undef k
 
 typedef struct AKWindow {
-    int width, height;
+    i32 width, height;
     bool32 running;
     u8 keys[AKKEY_LENGTH];
     u8 keys_previous[AKKEY_LENGTH];
     struct PlatformSpecificData data;
 } AKWindow;
 
-AKWindow window_init(int width, int height);
+AKWindow window_init(i32 width, i32 height);
 void window_update(AKWindow *const window);
 void window_deinit(const AKWindow *const window);
