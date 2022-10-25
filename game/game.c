@@ -12,6 +12,9 @@ int main(void)
         window_update(&window);
         if (AKKEY_JUST_PRESSED(ESCAPE) || AKKEY_JUST_PRESSED(Q))
             window.running = false;
+        if (AKKEY_JUST_PRESSED(SPACE)) {
+            renderer.data.current_shader = !renderer.data.current_shader;
+        }
         renderer_update(&renderer);
     }
     renderer_deinit(&renderer);

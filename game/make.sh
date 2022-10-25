@@ -1,4 +1,6 @@
-#!/bin/sh -e
+#!/bin/sh
+
+set -e
 
 SOURCE="game.c AKUtils.c"
 TARGET="game"
@@ -25,9 +27,9 @@ LDFLAGS="$LDFLAGS -lvulkan"
 mkdir -p "$OUTDIR"
 
 SHADERDIR="./shaders/"
-SHADERS="shader.vert shader.frag"
+SHADERS="colored_triangle.vert colored_triangle.frag red_triangle.vert red_triangle.frag"
 for FILE in $SHADERS; do
-    glslc "$SHADERDIR$FILE" -o "$OUTDIR${FILE##*.}.spv"
+    glslc "$SHADERDIR$FILE" -o "$OUTDIR$FILE.spv"
 done
 
 $CC -o "$OUTDIR$TARGET" $CFLAGS $DEFINES $SOURCE $LDFLAGS

@@ -104,6 +104,85 @@ static bool32 swapchain_reinit(AKRenderer *const renderer)
     return swapchain_init(renderer);
 }
 
+static VkPipeline graphics_pipeline_create(
+    VkDevice device,
+    VkPipelineShaderStageCreateInfo *stages,
+    size_t num_stages,
+    VkPipelineVertexInputStateCreateInfo *vertex_input,
+    VkPrimitiveTopology topology,
+    VkPolygonMode polygon_mode,
+    VkPipelineLayout pipeline_layout,
+    VkRenderPass render_pass
+) {
+    VkPipeline result = VK_NULL_HANDLE;
+    AKVK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &(VkGraphicsPipelineCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .stageCount = num_stages,
+        .pStages = stages,
+        .pVertexInputState = vertex_input,
+        .pInputAssemblyState = &(VkPipelineInputAssemblyStateCreateInfo) {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .topology = topology,
+            .primitiveRestartEnable = VK_FALSE
+        },
+        .pViewportState = &(VkPipelineViewportStateCreateInfo) {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            // dynamic state
+            .viewportCount = 1,
+            .scissorCount = 1
+        },
+        .pRasterizationState = &(VkPipelineRasterizationStateCreateInfo) {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .depthClampEnable = VK_FALSE,
+            .rasterizerDiscardEnable = VK_FALSE,
+            .polygonMode = polygon_mode,
+            .lineWidth = 1.0f,
+            .cullMode = VK_CULL_MODE_BACK_BIT,
+            .frontFace = VK_FRONT_FACE_CLOCKWISE,
+            .depthBiasEnable = VK_FALSE
+        },
+        .pMultisampleState = &(VkPipelineMultisampleStateCreateInfo) {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .sampleShadingEnable = VK_FALSE,
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
+        },
+        .pDepthStencilState = NULL,
+        .pColorBlendState = &(VkPipelineColorBlendStateCreateInfo) {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .logicOpEnable = VK_FALSE,
+            .attachmentCount = 1,
+            .pAttachments = &(VkPipelineColorBlendAttachmentState) {
+                .colorWriteMask = VK_COLOR_COMPONENT_R_BIT|VK_COLOR_COMPONENT_G_BIT|VK_COLOR_COMPONENT_B_BIT|VK_COLOR_COMPONENT_A_BIT,
+                .blendEnable = VK_FALSE
+            }
+        },
+        .pDynamicState = &(VkPipelineDynamicStateCreateInfo) {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .dynamicStateCount = 2,
+            .pDynamicStates = (const VkDynamicState []) {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR}
+        },
+        .layout = pipeline_layout,
+        .renderPass = render_pass,
+        .subpass = 0
+    }, NULL, &result));
+    return result;
+}
+
+static VkShaderModule shader_create(VkDevice device, const char *const filepath)
+{
+    VkShaderModule result = VK_NULL_HANDLE;
+    char *shader_src;
+    const long shader_src_len = read_binary_file(filepath, &shader_src);
+    AKAssert(shader_src_len != -1 && shader_src_len % 4 == 0);
+    AKVK_CHECK(vkCreateShaderModule(device, &(VkShaderModuleCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = shader_src_len,
+        .pCode = (const u32 *) shader_src
+    }, NULL, &result));
+    free(shader_src);
+    return result;
+}
+
 AKRenderer renderer_init(const AKWindow *const window)
 {
     AKRenderer result = {
@@ -267,31 +346,15 @@ AKRenderer renderer_init(const AKWindow *const window)
     }
     // createGraphicsPipeline()
     {
-        VkShaderModule vertex_shader_module;
-        VkShaderModule fragment_shader_module;
-        {
-            char *vertex_shader_src;
-            const long vertex_shader_len = read_binary_file("bin/vert.spv", &vertex_shader_src);
-            AKAssert(vertex_shader_len != -1 && vertex_shader_len % 4 == 0);
-            char *fragment_shader_src;
-            const long fragment_shader_len = read_binary_file("bin/frag.spv", &fragment_shader_src);
-            AKAssert(fragment_shader_len != -1 && fragment_shader_len % 4 == 0);
+        const VkShaderModule colored_vertex_shader_module = shader_create(result.data.device, "bin/colored_triangle.vert.spv");
+        const VkShaderModule colored_fragment_shader_module = shader_create(result.data.device, "bin/colored_triangle.frag.spv");
+        const VkShaderModule red_vertex_shader_module = shader_create(result.data.device, "bin/red_triangle.vert.spv");
+        const VkShaderModule red_fragment_shader_module = shader_create(result.data.device, "bin/red_triangle.frag.spv");
 
-            AKVK_CHECK(vkCreateShaderModule(result.data.device, &(VkShaderModuleCreateInfo) {
-                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                .codeSize = vertex_shader_len,
-                .pCode = (const u32 *) vertex_shader_src
-            }, NULL, &vertex_shader_module));
-
-            AKVK_CHECK(vkCreateShaderModule(result.data.device, &(VkShaderModuleCreateInfo) {
-                .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                .codeSize = fragment_shader_len,
-                .pCode = (const u32 *) fragment_shader_src
-            }, NULL, &fragment_shader_module));
-
-            free(fragment_shader_src);
-            free(vertex_shader_src);
-        }
+        AKAssert(colored_vertex_shader_module);
+        AKAssert(colored_fragment_shader_module);
+        AKAssert(red_vertex_shader_module);
+        AKAssert(red_fragment_shader_module);
 
         AKVK_CHECK(vkCreateRenderPass(result.data.device, &(VkRenderPassCreateInfo) {
             .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
@@ -328,80 +391,72 @@ AKRenderer renderer_init(const AKWindow *const window)
 
         AKVK_CHECK(vkCreatePipelineLayout(result.data.device, &(VkPipelineLayoutCreateInfo) {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
-        }, NULL, &result.data.pipeline_layout));
+        }, NULL, &result.data.triangle_pipeline_layout));
 
-        AKVK_CHECK(vkCreateGraphicsPipelines(result.data.device, VK_NULL_HANDLE, 1, &(VkGraphicsPipelineCreateInfo) {
-            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-            .stageCount = 2,
-            .pStages = (VkPipelineShaderStageCreateInfo []) {
+        result.data.triangle_pipeline = graphics_pipeline_create(
+            result.data.device,
+            (VkPipelineShaderStageCreateInfo []) {
                 {
                     .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                     .stage = VK_SHADER_STAGE_VERTEX_BIT,
-                    .module = vertex_shader_module,
+                    .module = colored_vertex_shader_module,
                     .pName = "main"
                 },
                 {
                     .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                     .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-                    .module = fragment_shader_module,
+                    .module = colored_fragment_shader_module,
                     .pName = "main"
                 },
             },
-            .pVertexInputState = &(VkPipelineVertexInputStateCreateInfo) {
+            2,
+            &(VkPipelineVertexInputStateCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
                 .vertexBindingDescriptionCount = 0,
                 .pVertexBindingDescriptions = NULL,
                 .vertexAttributeDescriptionCount = 0,
                 .pVertexAttributeDescriptions = NULL
             },
-            .pInputAssemblyState = &(VkPipelineInputAssemblyStateCreateInfo) {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-                .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                .primitiveRestartEnable = VK_FALSE
-            },
-            .pViewportState = &(VkPipelineViewportStateCreateInfo) {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-                // dynamic state
-                .viewportCount = 1,
-                .scissorCount = 1
-            },
-            .pRasterizationState = &(VkPipelineRasterizationStateCreateInfo) {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-                .depthClampEnable = VK_FALSE,
-                .rasterizerDiscardEnable = VK_FALSE,
-                .polygonMode = VK_POLYGON_MODE_FILL,
-                .lineWidth = 1.0f,
-                .cullMode = VK_CULL_MODE_BACK_BIT,
-                .frontFace = VK_FRONT_FACE_CLOCKWISE,
-                .depthBiasEnable = VK_FALSE
-            },
-            .pMultisampleState = &(VkPipelineMultisampleStateCreateInfo) {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-                .sampleShadingEnable = VK_FALSE,
-                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT
-            },
-            .pDepthStencilState = NULL,
-            .pColorBlendState = &(VkPipelineColorBlendStateCreateInfo) {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-                .logicOpEnable = VK_FALSE,
-                .attachmentCount = 1,
-                .pAttachments = &(VkPipelineColorBlendAttachmentState) {
-                    .colorWriteMask = VK_COLOR_COMPONENT_R_BIT|VK_COLOR_COMPONENT_G_BIT|VK_COLOR_COMPONENT_B_BIT|VK_COLOR_COMPONENT_A_BIT,
-                    .blendEnable = VK_FALSE
-                }
-            },
-            .pDynamicState = &(VkPipelineDynamicStateCreateInfo) {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-                .dynamicStateCount = 2,
-                .pDynamicStates = (const VkDynamicState []) {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR}
-            },
-            .layout = result.data.pipeline_layout,
-            .renderPass = result.data.render_pass,
-            .subpass = 0
-        }, NULL, &result.data.pipeline));
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            VK_POLYGON_MODE_FILL,
+            result.data.triangle_pipeline_layout,
+            result.data.render_pass
+        );
 
-        vkDestroyShaderModule(result.data.device, fragment_shader_module, NULL);
-        vkDestroyShaderModule(result.data.device, vertex_shader_module, NULL);
+        result.data.red_triangle_pipeline = graphics_pipeline_create(
+            result.data.device,
+            (VkPipelineShaderStageCreateInfo []) {
+                {
+                    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                    .stage = VK_SHADER_STAGE_VERTEX_BIT,
+                    .module = red_vertex_shader_module,
+                    .pName = "main"
+                },
+                {
+                    .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                    .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+                    .module = red_fragment_shader_module,
+                    .pName = "main"
+                },
+            },
+            2,
+            &(VkPipelineVertexInputStateCreateInfo) {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+                .vertexBindingDescriptionCount = 0,
+                .pVertexBindingDescriptions = NULL,
+                .vertexAttributeDescriptionCount = 0,
+                .pVertexAttributeDescriptions = NULL
+            },
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            VK_POLYGON_MODE_FILL,
+            result.data.triangle_pipeline_layout,
+            result.data.render_pass
+        );
+
+        vkDestroyShaderModule(result.data.device, red_fragment_shader_module, NULL);
+        vkDestroyShaderModule(result.data.device, red_vertex_shader_module, NULL);
+        vkDestroyShaderModule(result.data.device, colored_fragment_shader_module, NULL);
+        vkDestroyShaderModule(result.data.device, colored_vertex_shader_module, NULL);
     }
 
     AKAssert(swapchain_init(&result));
@@ -428,7 +483,7 @@ static bool32 record_command_buffer(const AKRenderer *const renderer, VkCommandB
         .clearValueCount = 1,
         .pClearValues = &(VkClearValue) {.color = {.float32 = {1.0f, 0.0f, 1.0f, 1.0f}}}
     }, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer->data.pipeline);
+    vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, !renderer->data.current_shader ? renderer->data.triangle_pipeline : renderer->data.red_triangle_pipeline);
     vkCmdSetViewport(buffer, 0, 1, &(VkViewport) {
         .x = 0.0f,
         .y = 0.0f,
@@ -518,8 +573,9 @@ void renderer_update(AKRenderer *const renderer)
 void renderer_deinit(const AKRenderer *const renderer)
 {
     swapchain_deinit(renderer);
-    vkDestroyPipeline(renderer->data.device, renderer->data.pipeline, NULL);
-    vkDestroyPipelineLayout(renderer->data.device, renderer->data.pipeline_layout, NULL);
+    vkDestroyPipeline(renderer->data.device, renderer->data.red_triangle_pipeline, NULL);
+    vkDestroyPipeline(renderer->data.device, renderer->data.triangle_pipeline, NULL);
+    vkDestroyPipelineLayout(renderer->data.device, renderer->data.triangle_pipeline_layout, NULL);
     vkDestroyRenderPass(renderer->data.device, renderer->data.render_pass, NULL);
     for (size_t i = 0; i < AKVK_MAX_FRAMES_IN_FLIGHT; ++i) {
         vkDestroyFence(renderer->data.device, renderer->data.in_flight_fences[i], NULL);

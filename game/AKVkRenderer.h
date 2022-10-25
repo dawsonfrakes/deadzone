@@ -42,8 +42,9 @@ struct APISpecificData {
     VkImage swapchain_images[10];
     VkImageView swapchain_image_views[10];
     VkRenderPass render_pass;
-    VkPipelineLayout pipeline_layout;
-    VkPipeline pipeline;
+    VkPipelineLayout triangle_pipeline_layout;
+    VkPipeline triangle_pipeline;
+    VkPipeline red_triangle_pipeline;
     VkFramebuffer framebuffers[10];
     VkCommandPool command_pool;
     VkCommandBuffer command_buffers[AKVK_MAX_FRAMES_IN_FLIGHT];
@@ -51,4 +52,6 @@ struct APISpecificData {
     VkSemaphore render_complete_semaphores[AKVK_MAX_FRAMES_IN_FLIGHT];
     VkFence in_flight_fences[AKVK_MAX_FRAMES_IN_FLIGHT];
     u32 current_frame;
+
+    u32 current_shader;
 };
