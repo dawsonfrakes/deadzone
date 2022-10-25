@@ -1,7 +1,5 @@
 #pragma once
 
-#include "AKDefines.h"
-
 #if !defined(AKKEY_WINDOW_ACCESSOR)
 #define AKKEY_WINDOW_ACCESSOR window.
 #endif

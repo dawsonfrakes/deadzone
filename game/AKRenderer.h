@@ -1,7 +1,5 @@
 #pragma once
 
-#include "AKDefines.h"
-
 typedef struct AKRenderer {
     bool32 success;
     struct APISpecificData data;

@@ -1,17 +1,4 @@
-#pragma once
-
-#include <X11/Xlib.h>
-
-struct PlatformSpecificData {
-    Display *dpy;
-    int scr;
-    Window win;
-    Atom wm_delete;
-};
-
-#include "AKWindow.h"
-
-#ifdef INCLUDE_SRC
+#include "AKEngine.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,5 +122,3 @@ void window_deinit(const AKWindow *const window)
     XSync(window->data.dpy, False);
     XCloseDisplay(window->data.dpy);
 }
-
-#endif /* INCLUDE_SRC */
