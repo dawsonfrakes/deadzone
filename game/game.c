@@ -1,7 +1,5 @@
 #include "AKEngine.h"
 
-#include <stdlib.h>
-
 int main(void)
 {
     AKWindow window = window_init(800, 600);

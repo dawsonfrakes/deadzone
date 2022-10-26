@@ -1,6 +1,8 @@
 #pragma once
 
+#include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 typedef int8_t i8;
 typedef int16_t i16;
@@ -22,6 +24,25 @@ typedef uint32_t bool32;
 
 typedef i64 optional_u32;
 #define nullopt -1
+
+typedef float f32;
+typedef double f64;
+
+typedef struct V2 { f32 x, y; } __attribute__((packed)) V2;
+typedef struct V3 { f32 x, y, z; } __attribute__((packed)) V3;
+typedef struct V4 { f32 x, y, z, w; } __attribute__((packed)) V4;
+
+// Resizable Array (std::vector<T>)
+typedef struct ArrayList {
+    u8 *data; // first byte of array
+    u16 element_size;
+    u16 length;
+    u16 capacity;
+} ArrayList;
+
+#define ArrayListOf(T, LENGTH) { .data = ((LENGTH) > 0 ? malloc(sizeof(T) * (LENGTH)) : NULL), .element_size = sizeof(T), .length = (LENGTH), .capacity = (LENGTH) }
+#define ArrayListAppend(LIST, ELEMENT) { if ((LIST).length == (LIST).capacity) { (LIST).capacity += 3; (LIST).data = realloc((LIST).data, (LIST).element_size * (LIST).capacity); } memcpy((LIST).data+((LIST).element_size * (LIST).length++), &(ELEMENT), (LIST).element_size); }
+#define ArrayListSize(LIST) ((LIST).element_size * (LIST).length)
 
 #define s_to_ms(s) ((s) * 1000ULL)
 #define s_to_us(s) (s_to_ms(s) * 1000ULL)

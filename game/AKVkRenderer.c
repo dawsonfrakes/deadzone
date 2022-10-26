@@ -1,7 +1,6 @@
 #include "AKEngine.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 
 #define AKVK_CHECK(vkresult) if ((vkresult) != VK_SUCCESS) {return result;}
 
@@ -183,6 +182,112 @@ static VkShaderModule shader_create(VkDevice device, const char *const filepath)
     return result;
 }
 
+static VkBuffer buffer_create(VkDevice device, VkDeviceSize buffer_size, VkBufferUsageFlags usage)
+{
+    VkBuffer result;
+    AKVK_CHECK(vkCreateBuffer(device, &(VkBufferCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = buffer_size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    }, NULL, &result));
+    return result;
+}
+
+static optional_u32 find_mem_type(VkPhysicalDeviceMemoryProperties mem_props, u32 type_filter, VkMemoryPropertyFlags properties)
+{
+    for (u32 i = 0; i < mem_props.memoryTypeCount; ++i) {
+        if ((type_filter & (1 << i)) && (mem_props.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+    return nullopt;
+}
+
+static VkDeviceMemory buffer_alloc(VkDevice device, VkPhysicalDeviceMemoryProperties mem_props, VkBuffer buffer, VkMemoryPropertyFlags properties)
+{
+    VkDeviceMemory result;
+    VkMemoryRequirements mem_req;
+    vkGetBufferMemoryRequirements(device, buffer, &mem_req);
+    AKVK_CHECK(vkAllocateMemory(device, &(VkMemoryAllocateInfo) {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_req.size,
+        .memoryTypeIndex = find_mem_type(mem_props, mem_req.memoryTypeBits, properties)
+    }, NULL, &result));
+    AKVK_CHECK(vkBindBufferMemory(device, buffer, result, 0));
+    return result;
+}
+
+static struct VertexInputDescription vertex_get_description(void)
+{
+    struct VertexInputDescription result = {
+        .bindings = ArrayListOf(VkVertexInputBindingDescription, 0),
+        .attributes = ArrayListOf(VkVertexInputAttributeDescription, 0)
+    };
+    ArrayListAppend(result.bindings, ((VkVertexInputBindingDescription) {
+        .binding = 0,
+        .stride = sizeof(Vertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+    }));
+    ArrayListAppend(result.attributes, ((VkVertexInputAttributeDescription) {
+        .binding = 0,
+        .location = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, position)
+    }));
+    ArrayListAppend(result.attributes, ((VkVertexInputAttributeDescription) {
+        .binding = 0,
+        .location = 1,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, normal)
+    }));
+    ArrayListAppend(result.attributes, ((VkVertexInputAttributeDescription) {
+        .binding = 0,
+        .location = 2,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, color)
+    }));
+    return result;
+}
+
+static Mesh mesh_create(VkDevice device, VkPhysicalDeviceMemoryProperties mem_props)
+{
+    Mesh result = {
+        .vertices = ArrayListOf(Vertex, 3)
+    };
+    AKAssert(result.vertices.data);
+    Vertex *vertices = (Vertex *) result.vertices.data;
+
+    vertices[0].position = (V3) { 1.0f, 1.0f, 0.0f };
+    vertices[0].normal = (V3) { 0.0f, 0.0f, 0.0f };
+    vertices[0].color = (V3) { 1.0f, 0.0f, 0.0f };
+
+    vertices[1].position = (V3) { -1.0f, 1.0f, 0.0f };
+    vertices[1].normal = (V3) { 0.0f, 0.0f, 0.0f };
+    vertices[1].color = (V3) { 0.0f, 1.0f, 0.0f };
+
+    vertices[2].position = (V3) { 0.0f, -1.0f, 0.0f };
+    vertices[2].normal = (V3) { 0.0f, 0.0f, 0.0f };
+    vertices[2].color = (V3) { 0.0f, 0.0f, 1.0f };
+
+    result.data.vertex_buffer = buffer_create(device, ArrayListSize(result.vertices), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    AKAssert(result.data.vertex_buffer);
+    result.data.vertex_buffer_memory = buffer_alloc(device, mem_props, result.data.vertex_buffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    AKAssert(result.data.vertex_buffer_memory);
+
+    return result;
+}
+
+static VkResult mesh_upload(VkDevice device, const Mesh *const mesh)
+{
+    void *data;
+    const VkResult result = vkMapMemory(device, mesh->data.vertex_buffer_memory, 0, ArrayListSize(mesh->vertices), 0, &data);
+    AKVK_CHECK(result);
+        memcpy(data, mesh->vertices.data, ArrayListSize(mesh->vertices));
+    vkUnmapMemory(device, mesh->data.vertex_buffer_memory);
+    return VK_SUCCESS;
+}
+
 AKRenderer renderer_init(const AKWindow *const window)
 {
     AKRenderer result = {
@@ -295,13 +400,13 @@ AKRenderer renderer_init(const AKWindow *const window)
                     .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                     .queueFamilyIndex = result.data.graphics_queue_family_index,
                     .queueCount = 1,
-                    .pQueuePriorities = (float []) {1.0f}
+                    .pQueuePriorities = (f32 []) {1.0f}
                 },
                 {
                     .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                     .queueFamilyIndex = result.data.present_queue_family_index,
                     .queueCount = 1,
-                    .pQueuePriorities = (float []) {1.0f}
+                    .pQueuePriorities = (f32 []) {1.0f}
                 }
             },
             .pEnabledFeatures = &(VkPhysicalDeviceFeatures) {0},
@@ -311,6 +416,12 @@ AKRenderer renderer_init(const AKWindow *const window)
 
         vkGetDeviceQueue(result.data.device, result.data.graphics_queue_family_index, 0, &result.data.graphics_queue);
         vkGetDeviceQueue(result.data.device, result.data.present_queue_family_index, 0, &result.data.present_queue);
+    }
+    // loadMeshData()
+    {
+        result.data.triangle_mesh = mesh_create(result.data.device, result.data.mem_props);
+        AKAssert(result.data.triangle_mesh.data.vertex_buffer_memory);
+        AKVK_CHECK(mesh_upload(result.data.device, &result.data.triangle_mesh));
     }
     // createCommandPool()
     {
@@ -346,11 +457,13 @@ AKRenderer renderer_init(const AKWindow *const window)
     }
     // createGraphicsPipeline()
     {
+        const VkShaderModule tri_mesh_vertex_shader_module = shader_create(result.data.device, "bin/tri_mesh.vert.spv");
         const VkShaderModule colored_vertex_shader_module = shader_create(result.data.device, "bin/colored_triangle.vert.spv");
         const VkShaderModule colored_fragment_shader_module = shader_create(result.data.device, "bin/colored_triangle.frag.spv");
         const VkShaderModule red_vertex_shader_module = shader_create(result.data.device, "bin/red_triangle.vert.spv");
         const VkShaderModule red_fragment_shader_module = shader_create(result.data.device, "bin/red_triangle.frag.spv");
 
+        AKAssert(tri_mesh_vertex_shader_module);
         AKAssert(colored_vertex_shader_module);
         AKAssert(colored_fragment_shader_module);
         AKAssert(red_vertex_shader_module);
@@ -393,13 +506,15 @@ AKRenderer renderer_init(const AKWindow *const window)
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
         }, NULL, &result.data.triangle_pipeline_layout));
 
+        const struct VertexInputDescription desc = vertex_get_description();
+
         result.data.triangle_pipeline = graphics_pipeline_create(
             result.data.device,
             (VkPipelineShaderStageCreateInfo []) {
                 {
                     .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                     .stage = VK_SHADER_STAGE_VERTEX_BIT,
-                    .module = colored_vertex_shader_module,
+                    .module = tri_mesh_vertex_shader_module,
                     .pName = "main"
                 },
                 {
@@ -412,16 +527,19 @@ AKRenderer renderer_init(const AKWindow *const window)
             2,
             &(VkPipelineVertexInputStateCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                .vertexBindingDescriptionCount = 0,
-                .pVertexBindingDescriptions = NULL,
-                .vertexAttributeDescriptionCount = 0,
-                .pVertexAttributeDescriptions = NULL
+                .vertexBindingDescriptionCount = desc.bindings.length,
+                .pVertexBindingDescriptions = (void *) desc.bindings.data,
+                .vertexAttributeDescriptionCount = desc.attributes.length,
+                .pVertexAttributeDescriptions = (void *) desc.attributes.data
             },
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
             VK_POLYGON_MODE_FILL,
             result.data.triangle_pipeline_layout,
             result.data.render_pass
         );
+
+        free(desc.attributes.data);
+        free(desc.bindings.data);
 
         result.data.red_triangle_pipeline = graphics_pipeline_create(
             result.data.device,
@@ -457,6 +575,7 @@ AKRenderer renderer_init(const AKWindow *const window)
         vkDestroyShaderModule(result.data.device, red_vertex_shader_module, NULL);
         vkDestroyShaderModule(result.data.device, colored_fragment_shader_module, NULL);
         vkDestroyShaderModule(result.data.device, colored_vertex_shader_module, NULL);
+        vkDestroyShaderModule(result.data.device, tri_mesh_vertex_shader_module, NULL);
     }
 
     AKAssert(swapchain_init(&result));
@@ -496,7 +615,8 @@ static bool32 record_command_buffer(const AKRenderer *const renderer, VkCommandB
         .offset = {0, 0},
         .extent = renderer->data.surface_caps.currentExtent
     });
-    vkCmdDraw(buffer, 3, 1, 0, 0);
+    vkCmdBindVertexBuffers(buffer, 0, 1, &renderer->data.triangle_mesh.data.vertex_buffer, &(VkDeviceSize) {0});
+    vkCmdDraw(buffer, renderer->data.triangle_mesh.vertices.length, 1, 0, 0);
     vkCmdEndRenderPass(buffer);
     AKVK_CHECK(vkEndCommandBuffer(buffer));
     return true;
@@ -583,6 +703,9 @@ void renderer_deinit(const AKRenderer *const renderer)
         vkDestroySemaphore(renderer->data.device, renderer->data.image_available_semaphores[i], NULL);
     }
     vkDestroyCommandPool(renderer->data.device, renderer->data.command_pool, NULL);
+    free(renderer->data.triangle_mesh.vertices.data);
+    vkFreeMemory(renderer->data.device, renderer->data.triangle_mesh.data.vertex_buffer_memory, NULL);
+    vkDestroyBuffer(renderer->data.device, renderer->data.triangle_mesh.data.vertex_buffer, NULL);
     vkDestroyDevice(renderer->data.device, NULL);
     vkDestroySurfaceKHR(renderer->data.instance, renderer->data.surface, NULL);
     vkDestroyInstance(renderer->data.instance, NULL);

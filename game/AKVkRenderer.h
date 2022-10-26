@@ -23,6 +23,18 @@
 
 #define AKVK_MAX_FRAMES_IN_FLIGHT 2
 
+struct APISpecificMeshData {
+    VkBuffer vertex_buffer;
+    VkDeviceMemory vertex_buffer_memory;
+};
+
+#include "AKMesh.h"
+
+struct VertexInputDescription {
+    ArrayList/*<VkVertexInputBindingDescription>*/ bindings;
+    ArrayList/*<VkVertexInputAttributeDescription>*/ attributes;
+};
+
 struct APISpecificData {
     VkInstance instance;
     VkPhysicalDevice physical_device;
@@ -53,5 +65,6 @@ struct APISpecificData {
     VkFence in_flight_fences[AKVK_MAX_FRAMES_IN_FLIGHT];
     u32 current_frame;
 
+    Mesh triangle_mesh;
     u32 current_shader;
 };
