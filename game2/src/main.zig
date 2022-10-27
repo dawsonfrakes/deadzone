@@ -14,7 +14,7 @@ pub fn main() !void {
     while (true) {
         window.update() orelse break;
         if (input.getKeyJustDown(.escape) or input.getKeyJustDown(.q)) break;
-        renderer.update() orelse break;
+        try renderer.update();
         input.tick();
     }
 }

@@ -27,6 +27,12 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    const shaders_step = b.step("shaders", "Compile SPIR-V shaders");
+    const vshad = b.addSystemCommand(&[_][]const u8{"glslc", "src/shaders/mesh.vert", "-o", "src/shaders/mesh.vert.spv"});
+    const fshad = b.addSystemCommand(&[_][]const u8{"glslc", "src/shaders/mesh.frag", "-o", "src/shaders/mesh.frag.spv"});
+    shaders_step.dependOn(&vshad.step);
+    shaders_step.dependOn(&fshad.step);
+
     const exe_tests = b.addTest("src/main.zig");
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
