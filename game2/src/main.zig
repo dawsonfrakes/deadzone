@@ -2,7 +2,7 @@ const Window = @import("Window.zig");
 const Renderer = @import("Renderer.zig");
 const Input = @import("Input.zig");
 
-pub fn main() anyerror!void {
+pub fn main() !void {
     var input = Input{};
 
     var window = try Window.create(.{ .input = &input });

@@ -86,7 +86,8 @@ const XlibWindowImpl = struct {
         _ = c.XAutoRepeatOff(result.data.dpy);
         const scr = c.XDefaultScreen(result.data.dpy);
         const root = c.XRootWindow(result.data.dpy, scr);
-        result.data.win = c.XCreateWindow(result.data.dpy, root, config.x, config.y, config.width, config.height, 0, c.CopyFromParent, c.InputOutput, c.CopyFromParent, c.CWEventMask, &std.mem.zeroInit(c.XSetWindowAttributes, .{.event_mask = c.ExposureMask|c.KeyPressMask|c.KeyReleaseMask}));
+        var s = std.mem.zeroInit(c.XSetWindowAttributes, .{.event_mask = c.ExposureMask|c.KeyPressMask|c.KeyReleaseMask});
+        result.data.win = c.XCreateWindow(result.data.dpy, root, config.x, config.y, config.width, config.height, 0, c.CopyFromParent, c.InputOutput, c.CopyFromParent, c.CWEventMask, &s);
         result.data.wm_close = c.XInternAtom(result.data.dpy, "WM_DELETE_WINDOW", c.False);
         _ = c.XSetWMProtocols(result.data.dpy, result.data.win, &result.data.wm_close, 1);
         _ = c.XMapWindow(result.data.dpy, result.data.win);
@@ -115,7 +116,6 @@ const XlibWindowImpl = struct {
                 else => {}
             }
         }
-        return;
     }
 
     fn destroy(self: Impl) void {

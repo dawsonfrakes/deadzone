@@ -75,7 +75,6 @@ const VulkanRendererImpl = struct {
     }
 
     fn create(config: CreateConfig) !Impl {
-        _ = config;
         const zi = std.mem.zeroInit;
         var result: VulkanRendererImpl = undefined;
         // createInstance()
@@ -164,7 +163,7 @@ const VulkanRendererImpl = struct {
                     if ((queue_family.queueFlags & c.VK_QUEUE_GRAPHICS_BIT) > 0)
                         break :blk @intCast(u32, i);
                 }
-                break :blk unreachable; // queue was not found, exit program
+                return error.QueueNotFound;
             };
 
             result.data.present_queue_family_index = blk: {
@@ -175,7 +174,7 @@ const VulkanRendererImpl = struct {
                     if (present_supported == c.VK_TRUE)
                         break :blk @intCast(u32, i);
                 }
-                break :blk unreachable; // queue was not found, exit program
+                return error.QueueNotFound;
             };
         }
         // createDevice()
