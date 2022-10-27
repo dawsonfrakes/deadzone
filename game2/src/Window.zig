@@ -19,8 +19,6 @@ pub const CreateConfig = struct {
     input: *Input
 };
 
-pub const WindowInformation = Impl.WindowData;
-
 pub fn create(config: CreateConfig) !Window {
     const impl = try Impl.create(config);
     return Window{ .impl = impl };
@@ -37,8 +35,6 @@ pub fn destroy(self: Window) void {
 /// We can't compile error in the `Impl` switch statement as its eagerly evaluated.
 /// So instead, we compile-error on the methods themselves for platforms which don't support windowing.
 const UnsupportedImpl = struct {
-    const WindowData = struct {};
-
     fn create(config: CreateConfig) !Impl {
         return unsupported(config);
     }
@@ -70,35 +66,32 @@ const XlibWindowImpl = struct {
         .backspace = c.XK_BackSpace, .tab = c.XK_Tab, .caps = c.XK_Caps_Lock, .space = c.XK_space, .escape = c.XK_Escape, .@"return" = c.XK_Return, .delete = c.XK_Delete,
         .left_control = c.XK_Control_L, .left_alt = c.XK_Alt_L, .left_shift = c.XK_Shift_L, .right_control = c.XK_Control_R, .right_alt = c.XK_Alt_R, .right_shift = c.XK_Shift_R,
     });
-    const WindowData = struct {
-        dpy: ?*c.Display,
-        win: c.Window,
-        wm_close: c.Atom,
-        input: *Input,
-    };
 
-    data: WindowData,
+    dpy: ?*c.Display,
+    win: c.Window,
+    wm_close: c.Atom,
+    input: *Input,
 
     fn create(config: CreateConfig) !Impl {
         var result: XlibWindowImpl = undefined;
-        result.data.dpy = c.XOpenDisplay(null);
-        try std.testing.expect(result.data.dpy != null);
-        _ = c.XAutoRepeatOff(result.data.dpy);
-        const scr = c.XDefaultScreen(result.data.dpy);
-        const root = c.XRootWindow(result.data.dpy, scr);
+        result.dpy = c.XOpenDisplay(null);
+        try std.testing.expect(result.dpy != null);
+        _ = c.XAutoRepeatOff(result.dpy);
+        const scr = c.XDefaultScreen(result.dpy);
+        const root = c.XRootWindow(result.dpy, scr);
         var s = std.mem.zeroInit(c.XSetWindowAttributes, .{.event_mask = c.ExposureMask|c.KeyPressMask|c.KeyReleaseMask});
-        result.data.win = c.XCreateWindow(result.data.dpy, root, config.x, config.y, config.width, config.height, 0, c.CopyFromParent, c.InputOutput, c.CopyFromParent, c.CWEventMask, &s);
-        result.data.wm_close = c.XInternAtom(result.data.dpy, "WM_DELETE_WINDOW", c.False);
-        _ = c.XSetWMProtocols(result.data.dpy, result.data.win, &result.data.wm_close, 1);
-        _ = c.XMapWindow(result.data.dpy, result.data.win);
-        result.data.input = config.input;
+        result.win = c.XCreateWindow(result.dpy, root, config.x, config.y, config.width, config.height, 0, c.CopyFromParent, c.InputOutput, c.CopyFromParent, c.CWEventMask, &s);
+        result.wm_close = c.XInternAtom(result.dpy, "WM_DELETE_WINDOW", c.False);
+        _ = c.XSetWMProtocols(result.dpy, result.win, &result.wm_close, 1);
+        _ = c.XMapWindow(result.dpy, result.win);
+        result.input = config.input;
         return result;
     }
 
     fn update(self: *Impl) ?void {
-        while (c.XPending(self.data.dpy) > 0) {
+        while (c.XPending(self.dpy) > 0) {
             var ev: c.XEvent = undefined;
-            _ = c.XNextEvent(self.data.dpy, &ev);
+            _ = c.XNextEvent(self.dpy, &ev);
             switch (ev.@"type") {
                 c.Expose => std.debug.print("Window(w={}, h={})\n", .{ev.xexpose.width, ev.xexpose.height}),
                 c.KeyPress, c.KeyRelease => {
@@ -107,11 +100,11 @@ const XlibWindowImpl = struct {
                     var i: usize = 0;
                     while (i < key_lookup.len) : (i += 1) {
                         if (key_lookup[i] == sym)
-                            self.data.input.setKey(@intToEnum(Input.Keys, i), pressed);
+                            self.input.setKey(@intToEnum(Input.Keys, i), pressed);
                     }
                 },
                 c.MappingNotify => _ = c.XRefreshKeyboardMapping(&ev.xmapping),
-                c.ClientMessage => if (ev.xclient.data.l[0] == self.data.wm_close) return null,
+                c.ClientMessage => if (ev.xclient.data.l[0] == self.wm_close) return null,
                 c.DestroyNotify => return null,
                 else => {}
             }
@@ -119,8 +112,8 @@ const XlibWindowImpl = struct {
     }
 
     fn destroy(self: Impl) void {
-        _ = c.XDestroyWindow(self.data.dpy, self.data.win);
-        _ = c.XAutoRepeatOn(self.data.dpy);
-        _ = c.XCloseDisplay(self.data.dpy);
+        _ = c.XDestroyWindow(self.dpy, self.win);
+        _ = c.XAutoRepeatOn(self.dpy);
+        _ = c.XCloseDisplay(self.dpy);
     }
 };
