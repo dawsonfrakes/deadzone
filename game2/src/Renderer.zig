@@ -10,6 +10,12 @@ const Impl = switch (platform.RENDER_LIBRARY) {
 
 impl: Impl,
 
+const Vertex = struct {
+    position: @Vector(3, f32),
+    normal: @Vector(3, f32),
+    color: @Vector(3, f32),
+};
+
 pub const CreateConfig = struct {
     window: *const Window,
 };
@@ -88,12 +94,6 @@ const VulkanRendererImpl = struct {
 
     const zi = std.mem.zeroInit;
 
-    const Vertex = struct {
-        position: @Vector(3, f32),
-        normal: @Vector(3, f32),
-        color: @Vector(3, f32),
-    };
-
     fn VertexInputDescription(comptime T: type) type {
         return struct {
             const Self = @This();
@@ -102,29 +102,41 @@ const VulkanRendererImpl = struct {
             bindings: [1]c.VkVertexInputBindingDescription,
             attributes: [Info.fields.len]c.VkVertexInputAttributeDescription,
 
-            const float_formats = [_]c_int{
-                0,
-                c.VK_FORMAT_R32_SFLOAT,
-                c.VK_FORMAT_R32G32_SFLOAT,
-                c.VK_FORMAT_R32G32B32_SFLOAT
-            };
+            fn getFormat(comptime i: comptime_int) c_uint {
+                const vector = @typeInfo(Info.fields[i].field_type).Vector;
+                std.debug.assert(vector.len > 0 and vector.len <= 4);
+                return switch (vector.child) {
+                    f32 => switch (vector.len) {
+                        1 => c.VK_FORMAT_R32_SFLOAT,
+                        2 => c.VK_FORMAT_R32G32_SFLOAT,
+                        3 => c.VK_FORMAT_R32G32B32_SFLOAT,
+                        4 => c.VK_FORMAT_R32G32B32A32_SFLOAT,
+                        else => unreachable,
+                    },
+                    else => @compileError(@typeName(vector.child)),
+                };
+            }
 
             fn init() Self {
-                comptime var result: Self = undefined;
-                result.bindings[0] = .{
-                    .binding = 0,
-                    .stride = @sizeOf(T),
-                    .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX
-                };
-                inline for (result.attributes) |*attribute, i| {
-                    attribute.* = .{
-                        .binding = 0,
-                        .location = @intCast(u32, i),
-                        .format = float_formats[@typeInfo(Info.fields[i].field_type).Vector.len],
-                        .offset = @offsetOf(T, Info.fields[i].name)
-                    };
+                comptime {
+                    var result: Self = undefined;
+                    for (result.bindings) |*binding, i| {
+                        binding.* = .{
+                            .binding = i,
+                            .stride = @sizeOf(T),
+                            .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX,
+                        };
+                    }
+                    for (result.attributes) |*attribute, i| {
+                        attribute.* = .{
+                            .binding = 0,
+                            .location = @intCast(u32, i),
+                            .format = getFormat(i),
+                            .offset = @offsetOf(T, Info.fields[i].name),
+                        };
+                    }
+                    return result;
                 }
-                return result;
             }
         };
     }
