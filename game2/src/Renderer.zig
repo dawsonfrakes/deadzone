@@ -92,44 +92,42 @@ const VulkanRendererImpl = struct {
         position: @Vector(3, f32),
         normal: @Vector(3, f32),
         color: @Vector(3, f32),
-
-        const VertexInputDescription = struct {
-            bindings: []c.VkVertexInputBindingDescription,
-            attributes: []c.VkVertexInputAttributeDescription
-        };
-
-        fn getDescription() !VertexInputDescription {
-            var bindings = std.ArrayList(c.VkVertexInputBindingDescription).init(std.heap.c_allocator);
-            var attributes = std.ArrayList(c.VkVertexInputAttributeDescription).init(std.heap.c_allocator);
-            try bindings.append(zi(c.VkVertexInputBindingDescription, .{
-                .binding = 0,
-                .stride = @sizeOf(Vertex),
-                .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX
-            }));
-            try attributes.append(zi(c.VkVertexInputAttributeDescription, .{
-                .binding = 0,
-                .location = 0,
-                .format = c.VK_FORMAT_R32G32B32_SFLOAT,
-                .offset = @offsetOf(Vertex, "position")
-            }));
-            try attributes.append(zi(c.VkVertexInputAttributeDescription, .{
-                .binding = 0,
-                .location = 1,
-                .format = c.VK_FORMAT_R32G32B32_SFLOAT,
-                .offset = @offsetOf(Vertex, "normal")
-            }));
-            try attributes.append(zi(c.VkVertexInputAttributeDescription, .{
-                .binding = 0,
-                .location = 2,
-                .format = c.VK_FORMAT_R32G32B32_SFLOAT,
-                .offset = @offsetOf(Vertex, "color")
-            }));
-            return VertexInputDescription{
-                .bindings = bindings.toOwnedSlice(),
-                .attributes = attributes.toOwnedSlice()
-            };
-        }
     };
+
+    fn VertexInputDescription(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            const Info = @typeInfo(T).Struct;
+
+            bindings: [1]c.VkVertexInputBindingDescription,
+            attributes: [Info.fields.len]c.VkVertexInputAttributeDescription,
+
+            const float_formats = [_]c_int{
+                0,
+                c.VK_FORMAT_R32_SFLOAT,
+                c.VK_FORMAT_R32G32_SFLOAT,
+                c.VK_FORMAT_R32G32B32_SFLOAT
+            };
+
+            fn init() Self {
+                comptime var result: Self = undefined;
+                result.bindings[0] = .{
+                    .binding = 0,
+                    .stride = @sizeOf(T),
+                    .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX
+                };
+                inline for (result.attributes) |*attribute, i| {
+                    attribute.* = .{
+                        .binding = 0,
+                        .location = @intCast(u32, i),
+                        .format = float_formats[@typeInfo(Info.fields[i].field_type).Vector.len],
+                        .offset = @offsetOf(T, Info.fields[i].name)
+                    };
+                }
+                return result;
+            }
+        };
+    }
 
     fn vkCheck(result: c.VkResult) !void {
         if (result != c.VK_SUCCESS) {
@@ -486,7 +484,7 @@ const VulkanRendererImpl = struct {
             const topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             const polygon_mode = c.VK_POLYGON_MODE_FILL;
             const layout = result.triangle_graphics_pipeline_layout;
-            const desc = try Vertex.getDescription();
+            const desc = comptime VertexInputDescription(Vertex).init();
             try vkCheck(c.vkCreateGraphicsPipelines(result.device, null, 1, &zi(c.VkGraphicsPipelineCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                 .stageCount = stages.len,
@@ -494,9 +492,9 @@ const VulkanRendererImpl = struct {
                 .pVertexInputState = &zi(c.VkPipelineVertexInputStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
                     .vertexBindingDescriptionCount = @intCast(u32, desc.bindings.len),
-                    .pVertexBindingDescriptions = desc.bindings.ptr,
+                    .pVertexBindingDescriptions = &desc.bindings,
                     .vertexAttributeDescriptionCount = @intCast(u32, desc.attributes.len),
-                    .pVertexAttributeDescriptions = desc.attributes.ptr
+                    .pVertexAttributeDescriptions = &desc.attributes
                 }),
                 .pInputAssemblyState = &zi(c.VkPipelineInputAssemblyStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
