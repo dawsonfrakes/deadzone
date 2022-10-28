@@ -56,6 +56,7 @@ const UnsupportedImpl = struct {
 };
 
 const VulkanRendererImpl = struct {
+    const zi = std.mem.zeroInit;
     const max_frames_rendering_at_once = 2;
     const max_swapchain_images = 10;
 
@@ -91,8 +92,7 @@ const VulkanRendererImpl = struct {
     // temporary
     triangle_graphics_pipeline_layout: c.VkPipelineLayout,
     triangle_graphics_pipeline: c.VkPipeline,
-
-    const zi = std.mem.zeroInit;
+    triangle_mesh: Mesh,
 
     fn VertexInputDescription(comptime T: type) type {
         return struct {
@@ -147,6 +147,75 @@ const VulkanRendererImpl = struct {
             return error.VkError;
         }
     }
+
+    const Buffer = struct {
+        const Self = @This();
+
+        impl: *const VulkanRendererImpl,
+        buffer: c.VkBuffer,
+        memory: c.VkDeviceMemory,
+
+        fn find_mem_type(self: Self, type_filter: u32, properties: c.VkMemoryPropertyFlags) ?u32 {
+            var i: u5 = 0;
+            while (i < self.impl.physical_device_memory_properties.memoryTypeCount) : (i += 1) {
+                if ((type_filter & (@as(u32, 1) << i)) != 0 and (self.impl.physical_device_memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+                    return i;
+                }
+            }
+            return null;
+        }
+
+        fn create(impl: *const VulkanRendererImpl, size: c.VkDeviceSize, usage: c.VkBufferUsageFlags, properties: c.VkMemoryPropertyFlags) !Self {
+            var result: Self = undefined;
+            result.impl = impl;
+            try vkCheck(c.vkCreateBuffer(impl.device, &zi(c.VkBufferCreateInfo, .{
+                .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = size,
+                .usage = usage,
+                .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE,
+            }), null, &result.buffer));
+            errdefer c.vkDestroyBuffer(impl.device, result.buffer, null);
+            var mem_req: c.VkMemoryRequirements = undefined;
+            c.vkGetBufferMemoryRequirements(impl.device, result.buffer, &mem_req);
+            try vkCheck(c.vkAllocateMemory(impl.device, &zi(c.VkMemoryAllocateInfo, .{
+                .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .allocationSize = mem_req.size,
+                .memoryTypeIndex = result.find_mem_type(mem_req.memoryTypeBits, properties) orelse return error.NoMemoryTypeFound,
+            }), null, &result.memory));
+            errdefer c.vkFreeMemory(impl.device, result.memory, null);
+            try vkCheck(c.vkBindBufferMemory(impl.device, result.buffer, result.memory, 0));
+            return result;
+        }
+
+        fn destroy(self: Self) void {
+            c.vkFreeMemory(self.impl.device, self.memory, null);
+            c.vkDestroyBuffer(self.impl.device, self.buffer, null);
+        }
+    };
+
+    const Mesh = struct {
+        const Self = @This();
+
+        buffer: Buffer,
+        draw_count: u32,
+
+        fn create(impl: *const VulkanRendererImpl, vertices: []const Vertex) !Self {
+            const sizeof_vertices = @sizeOf(Vertex) * vertices.len;
+            var result: Self = undefined;
+            result.draw_count = @intCast(u32, vertices.len);
+            result.buffer = try Buffer.create(impl, sizeof_vertices, c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            var data: ?*anyopaque = undefined;
+            try vkCheck(c.vkMapMemory(impl.device, result.buffer.memory, 0, vertices.len, 0, &data));
+            std.debug.assert(data != null);
+                std.mem.copy(Vertex, @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), data.?))[0..vertices.len], vertices);
+            c.vkUnmapMemory(impl.device, result.buffer.memory);
+            return result;
+        }
+
+        fn destroy(self: Self) void {
+            self.buffer.destroy();
+        }
+    };
 
     fn swapchain_init(self: *VulkanRendererImpl) !void {
         // getSurfaceInfo()
@@ -546,6 +615,24 @@ const VulkanRendererImpl = struct {
             }), null, &result.triangle_graphics_pipeline));
         }
 
+        result.triangle_mesh = try Mesh.create(&result, &[_]Vertex{
+            .{
+                .position = .{ 1.0, 1.0, 0.0 },
+                .normal = .{ 0.0, 0.0, 0.0 },
+                .color = .{ 1.0, 0.0, 0.0 },
+            },
+            .{
+                .position = .{ -1.0, 1.0, 0.0 },
+                .normal = .{ 0.0, 0.0, 0.0 },
+                .color = .{ 0.0, 1.0, 0.0 },
+            },
+            .{
+                .position = .{ 0.0, -1.0, 0.0 },
+                .normal = .{ 0.0, 0.0, 0.0 },
+                .color = .{ 0.0, 0.0, 1.0 },
+            },
+        });
+
         try result.swapchain_init();
 
         return result;
@@ -580,8 +667,8 @@ const VulkanRendererImpl = struct {
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.surface_capabilities.currentExtent
         }));
-        // c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.triangle_mesh.buffer, &[_]c.VkDeviceSize{0});
-        // c.vkCmdDraw(buffer, self.triangle_mesh.vertices.len, 1, 0, 0);
+        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        c.vkCmdDraw(buffer, self.triangle_mesh.draw_count, 1, 0, 0);
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
     }
@@ -625,6 +712,7 @@ const VulkanRendererImpl = struct {
 
     fn destroy(self: VulkanRendererImpl) void {
         swapchain_deinit(self);
+        self.triangle_mesh.destroy();
         c.vkDestroyPipeline(self.device, self.triangle_graphics_pipeline, null);
         c.vkDestroyPipelineLayout(self.device, self.triangle_graphics_pipeline_layout, null);
         c.vkDestroyRenderPass(self.device, self.render_pass, null);
