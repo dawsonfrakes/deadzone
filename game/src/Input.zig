@@ -16,7 +16,7 @@ pub const Keys = enum {
 keys: std.EnumArray(Keys, bool) = std.EnumArray(Keys, bool).initFill(false),
 keys_previous: std.EnumArray(Keys, bool) = std.EnumArray(Keys, bool).initFill(false),
 
-pub fn tick(self: *Input) void {
+pub fn save(self: *Input) void {
     self.keys_previous = self.keys;
 }
 

@@ -2,6 +2,7 @@ const std = @import("std");
 const platform = @import("platform.zig");
 const c = @import("c.zig");
 const Window = @import("Window.zig");
+const Time = @import("Time.zig");
 
 const Renderer = @This();
 const Impl = switch (platform.RENDER_LIBRARY) {
@@ -23,6 +24,7 @@ const MeshPushConstants = struct {
 
 pub const CreateConfig = struct {
     window: *const Window,
+    time: *const Time,
 };
 
 pub fn create(config: CreateConfig) !Renderer {
@@ -92,10 +94,13 @@ pub fn parseObj(comptime path: []const u8) ![]Vertex {
     for (faces[0..num_faces]) |face, i| {
         result[i * 3 + 0].position = vertices[face[0][0]];
         result[i * 3 + 0].normal = normals[face[2][0]];
+        result[i * 3 + 0].color = .{ 1.0, 0.0, 0.0 };
         result[i * 3 + 1].position = vertices[face[0][1]];
         result[i * 3 + 1].normal = normals[face[2][1]];
+        result[i * 3 + 1].color = .{ 0.0, 1.0, 0.0 };
         result[i * 3 + 2].position = vertices[face[0][2]];
         result[i * 3 + 2].normal = normals[face[2][2]];
+        result[i * 3 + 2].color = .{ 0.0, 0.0, 1.0 };
     }
 
     return &result;
@@ -127,6 +132,8 @@ const VulkanRendererImpl = struct {
     const zi = std.mem.zeroInit;
     const max_frames_rendering_at_once = 2;
     const max_swapchain_images = 10;
+
+    time: *const Time,
 
     instance: c.VkInstance,
     physical_device: c.VkPhysicalDevice,
@@ -161,6 +168,7 @@ const VulkanRendererImpl = struct {
     mesh_graphics_pipeline_layout: c.VkPipelineLayout,
     mesh_graphics_pipeline: c.VkPipeline,
     triangle_mesh: Mesh,
+    cube_mesh: Mesh,
 
     fn vkCheck(result: c.VkResult) !void {
         if (result != c.VK_SUCCESS) {
@@ -389,6 +397,7 @@ const VulkanRendererImpl = struct {
 
     fn create(config: CreateConfig) !VulkanRendererImpl {
         var result: VulkanRendererImpl = undefined;
+        result.time = config.time;
         result.current_frame = 0;
         // createInstance()
         {
@@ -707,6 +716,8 @@ const VulkanRendererImpl = struct {
             },
         });
 
+        result.cube_mesh = try Mesh.create(&result, try comptime parseObj("cube.obj"));
+
         try result.swapchain_init();
 
         return result;
@@ -726,7 +737,7 @@ const VulkanRendererImpl = struct {
                 .extent = self.surface_capabilities.currentExtent,
             },
             .clearValueCount = 1,
-            .pClearValues = &c.VkClearValue{ .color = .{ .float32 = [_]f32{ 1.0, 0.0, 1.0, 1.0 } } },
+            .pClearValues = &c.VkClearValue{ .color = .{ .float32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 } } },
         }), c.VK_SUBPASS_CONTENTS_INLINE);
         c.vkCmdBindPipeline(buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.mesh_graphics_pipeline);
         c.vkCmdSetViewport(buffer, 0, 1, &zi(c.VkViewport, .{
@@ -742,7 +753,8 @@ const VulkanRendererImpl = struct {
             .extent = self.surface_capabilities.currentExtent,
         }));
         c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
-        const translate = @Vector(3, f32){ 0.5, 0.0, 0.0 };
+        const x = std.math.sin(@floatCast(f32, self.time.running)) / 2.0;
+        const translate = @Vector(3, f32){ x, 0.0, 0.0 };
         const scale = @Vector(3, f32){ 0.5, 0.5, 1.0 };
         c.vkCmdPushConstants(buffer, self.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
             .render_matrix = [_]@Vector(4, f32){
@@ -753,6 +765,8 @@ const VulkanRendererImpl = struct {
             },
         }));
         c.vkCmdDraw(buffer, self.triangle_mesh.draw_count, 1, 0, 0);
+        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.cube_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        c.vkCmdDraw(buffer, self.cube_mesh.draw_count, 1, 0, 0);
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
     }
@@ -796,6 +810,7 @@ const VulkanRendererImpl = struct {
 
     fn destroy(self: VulkanRendererImpl) void {
         swapchain_deinit(self);
+        self.cube_mesh.destroy();
         self.triangle_mesh.destroy();
         c.vkDestroyPipeline(self.device, self.mesh_graphics_pipeline, null);
         c.vkDestroyPipelineLayout(self.device, self.mesh_graphics_pipeline_layout, null);
