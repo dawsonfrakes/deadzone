@@ -16,6 +16,11 @@ const Vertex = struct {
     color: @Vector(3, f32),
 };
 
+const MeshPushConstants = struct {
+    data: @Vector(4, f32),
+    render_matrix: [4]@Vector(4, f32),
+};
+
 pub const CreateConfig = struct {
     window: *const Window,
 };
@@ -90,9 +95,16 @@ const VulkanRendererImpl = struct {
     current_frame: u32,
 
     // temporary
-    triangle_graphics_pipeline_layout: c.VkPipelineLayout,
-    triangle_graphics_pipeline: c.VkPipeline,
+    mesh_graphics_pipeline_layout: c.VkPipelineLayout,
+    mesh_graphics_pipeline: c.VkPipeline,
     triangle_mesh: Mesh,
+
+    fn vkCheck(result: c.VkResult) !void {
+        if (result != c.VK_SUCCESS) {
+            std.debug.print("VkResult({})\n", .{result});
+            return error.VkError;
+        }
+    }
 
     fn VertexInputDescription(comptime T: type) type {
         return struct {
@@ -139,13 +151,6 @@ const VulkanRendererImpl = struct {
                 }
             }
         };
-    }
-
-    fn vkCheck(result: c.VkResult) !void {
-        if (result != c.VK_SUCCESS) {
-            std.debug.print("VkResult({})\n", .{result});
-            return error.VkError;
-        }
     }
 
     const Buffer = struct {
@@ -466,18 +471,18 @@ const VulkanRendererImpl = struct {
                 .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
                 .commandPool = result.graphics_command_pool,
                 .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-                .commandBufferCount = max_frames_rendering_at_once
+                .commandBufferCount = max_frames_rendering_at_once,
             }), &result.graphics_command_buffers));
         }
         // createSyncObjects()
         {
             var i: usize = 0;
             const semaphore_create_info = zi(c.VkSemaphoreCreateInfo, .{
-                .sType = c.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+                .sType = c.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
             });
             const fence_create_info = zi(c.VkFenceCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-                .flags = c.VK_FENCE_CREATE_SIGNALED_BIT
+                .flags = c.VK_FENCE_CREATE_SIGNALED_BIT,
             });
             while (i < max_frames_rendering_at_once) : (i += 1) {
                 try vkCheck(c.vkCreateSemaphore(result.device, &semaphore_create_info, null, &result.image_acquired_semaphores[i]));
@@ -506,7 +511,7 @@ const VulkanRendererImpl = struct {
                     .colorAttachmentCount = 1,
                     .pColorAttachments = &zi(c.VkAttachmentReference, .{
                         .attachment = 0,
-                        .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                        .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     }),
                 }),
                 .dependencyCount = 1,
@@ -516,7 +521,7 @@ const VulkanRendererImpl = struct {
                     .srcStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                     .srcAccessMask = 0,
                     .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                    .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                 })
             }), null, &result.render_pass));
         }
@@ -528,7 +533,7 @@ const VulkanRendererImpl = struct {
             try vkCheck(c.vkCreateShaderModule(result.device, &zi(c.VkShaderModuleCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
                 .codeSize = vertex_shader_code.len,
-                .pCode = @ptrCast(*const u32, vertex_shader_code)
+                .pCode = @ptrCast(*const u32, vertex_shader_code),
             }), null, &vertex_shader_module));
 
             const fragment_shader_code = @alignCast(4, @embedFile("shaders/mesh.frag.spv"));
@@ -543,8 +548,14 @@ const VulkanRendererImpl = struct {
         // createGraphicsPipelineLayout()
         {
             try vkCheck(c.vkCreatePipelineLayout(result.device, &zi(c.VkPipelineLayoutCreateInfo, .{
-                .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
-            }), null, &result.triangle_graphics_pipeline_layout));
+                .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                .pushConstantRangeCount = 1,
+                .pPushConstantRanges = &zi(c.VkPushConstantRange, .{
+                    .stageFlags = c.VK_SHADER_STAGE_VERTEX_BIT,
+                    .offset = 0,
+                    .size = @sizeOf(MeshPushConstants),
+                }),
+            }), null, &result.mesh_graphics_pipeline_layout));
         }
         // createGraphicsPipeline()
         {
@@ -564,7 +575,7 @@ const VulkanRendererImpl = struct {
             };
             const topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             const polygon_mode = c.VK_POLYGON_MODE_FILL;
-            const layout = result.triangle_graphics_pipeline_layout;
+            const layout = result.mesh_graphics_pipeline_layout;
             const desc = comptime VertexInputDescription(Vertex).init();
             try vkCheck(c.vkCreateGraphicsPipelines(result.device, null, 1, &zi(c.VkGraphicsPipelineCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
@@ -612,7 +623,7 @@ const VulkanRendererImpl = struct {
                 .layout = layout,
                 .renderPass = result.render_pass,
                 .subpass = 0
-            }), null, &result.triangle_graphics_pipeline));
+            }), null, &result.mesh_graphics_pipeline));
         }
 
         result.triangle_mesh = try Mesh.create(&result, &[_]Vertex{
@@ -654,7 +665,7 @@ const VulkanRendererImpl = struct {
             .clearValueCount = 1,
             .pClearValues = &c.VkClearValue{.color = .{.float32 = [_]f32{1.0, 0.0, 1.0, 1.0}}}
         }), c.VK_SUBPASS_CONTENTS_INLINE);
-        c.vkCmdBindPipeline(buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.triangle_graphics_pipeline);
+        c.vkCmdBindPipeline(buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.mesh_graphics_pipeline);
         c.vkCmdSetViewport(buffer, 0, 1, &zi(c.VkViewport, .{
             .x = 0.0,
             .y = 0.0,
@@ -668,6 +679,16 @@ const VulkanRendererImpl = struct {
             .extent = self.surface_capabilities.currentExtent
         }));
         c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        const translate = @Vector(3, f32){ 0.5, 0.0, 0.0 };
+        const scale = @Vector(3, f32){ 0.5, 0.5, 1.0 };
+        c.vkCmdPushConstants(buffer, self.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
+            .render_matrix = [_]@Vector(4, f32){
+                .{ scale[0], 0.0, 0.0, 0.0 },
+                .{ 0.0, scale[1], 0.0, 0.0 },
+                .{ 0.0, 0.0, scale[2], 0.0 },
+                .{ translate[0], translate[1], translate[2], 1.0 },
+            }
+        }));
         c.vkCmdDraw(buffer, self.triangle_mesh.draw_count, 1, 0, 0);
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
@@ -713,8 +734,8 @@ const VulkanRendererImpl = struct {
     fn destroy(self: VulkanRendererImpl) void {
         swapchain_deinit(self);
         self.triangle_mesh.destroy();
-        c.vkDestroyPipeline(self.device, self.triangle_graphics_pipeline, null);
-        c.vkDestroyPipelineLayout(self.device, self.triangle_graphics_pipeline_layout, null);
+        c.vkDestroyPipeline(self.device, self.mesh_graphics_pipeline, null);
+        c.vkDestroyPipelineLayout(self.device, self.mesh_graphics_pipeline_layout, null);
         c.vkDestroyRenderPass(self.device, self.render_pass, null);
         var i: usize = 0;
         while (i < max_frames_rendering_at_once) : (i += 1) {
