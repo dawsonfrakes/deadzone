@@ -1,6 +1,7 @@
 const std = @import("std");
 const Input = @This();
 
+// zig fmt: off
 pub const Keys = enum {
     a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z,
     @"0",  @"1",  @"2",  @"3",  @"4",  @"5",  @"6",  @"7",  @"8",  @"9",
@@ -10,6 +11,7 @@ pub const Keys = enum {
     backspace, tab, caps, space, escape, @"return", delete,
     left_control, left_alt, left_shift, right_control, right_alt, right_shift,
 };
+// zig fmt: on
 
 keys: std.EnumArray(Keys, bool) = std.EnumArray(Keys, bool).initFill(false),
 keys_previous: std.EnumArray(Keys, bool) = std.EnumArray(Keys, bool).initFill(false),

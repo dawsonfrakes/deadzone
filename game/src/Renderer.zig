@@ -208,11 +208,11 @@ const VulkanRendererImpl = struct {
             const sizeof_vertices = @sizeOf(Vertex) * vertices.len;
             var result: Self = undefined;
             result.draw_count = @intCast(u32, vertices.len);
-            result.buffer = try Buffer.create(impl, sizeof_vertices, c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            result.buffer = try Buffer.create(impl, sizeof_vertices, c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
             var data: ?*anyopaque = undefined;
             try vkCheck(c.vkMapMemory(impl.device, result.buffer.memory, 0, vertices.len, 0, &data));
             std.debug.assert(data != null);
-                std.mem.copy(Vertex, @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), data.?))[0..vertices.len], vertices);
+            std.mem.copy(Vertex, @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), data.?))[0..vertices.len], vertices);
             c.vkUnmapMemory(impl.device, result.buffer.memory);
             return result;
         }
@@ -248,12 +248,12 @@ const VulkanRendererImpl = struct {
                 .imageUsage = c.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
                 .imageSharingMode = if (same_family) @as(c.VkSharingMode, c.VK_SHARING_MODE_EXCLUSIVE) else @as(c.VkSharingMode, c.VK_SHARING_MODE_CONCURRENT),
                 .queueFamilyIndexCount = if (same_family) @as(u32, 0) else @as(u32, 2),
-                .pQueueFamilyIndices = &[_]u32{self.graphics_queue_family_index, self.present_queue_family_index},
+                .pQueueFamilyIndices = &[_]u32{ self.graphics_queue_family_index, self.present_queue_family_index },
                 .preTransform = c.VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
                 .compositeAlpha = c.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
                 .presentMode = self.surface_present_mode,
                 .clipped = c.VK_TRUE,
-                .oldSwapchain = @ptrCast(c.VkSwapchainKHR, c.VK_NULL_HANDLE)
+                .oldSwapchain = @ptrCast(c.VkSwapchainKHR, c.VK_NULL_HANDLE),
             }), null, &self.swapchain));
         }
         // getSwapchainImageAndFinalImageCount()
@@ -283,8 +283,8 @@ const VulkanRendererImpl = struct {
                         .baseMipLevel = 0,
                         .levelCount = 1,
                         .baseArrayLayer = 0,
-                        .layerCount = 1
-                    }
+                        .layerCount = 1,
+                    },
                 }), null, &self.swapchain_image_views[i]));
             }
         }
@@ -299,7 +299,7 @@ const VulkanRendererImpl = struct {
                     .pAttachments = &self.swapchain_image_views[i],
                     .width = self.surface_capabilities.currentExtent.width,
                     .height = self.surface_capabilities.currentExtent.height,
-                    .layers = 1
+                    .layers = 1,
                 }), null, &self.framebuffers[i]));
             }
         }
@@ -330,12 +330,12 @@ const VulkanRendererImpl = struct {
         // createInstance()
         {
             const instance_layers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
-            const instance_extensions = [_][*c]const u8{c.VK_KHR_SURFACE_EXTENSION_NAME, c.VK_KHR_XLIB_SURFACE_EXTENSION_NAME};
+            const instance_extensions = [_][*c]const u8{ c.VK_KHR_SURFACE_EXTENSION_NAME, c.VK_KHR_XLIB_SURFACE_EXTENSION_NAME };
             try vkCheck(c.vkCreateInstance(&zi(c.VkInstanceCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
                 .pApplicationInfo = &zi(c.VkApplicationInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                    .apiVersion = c.VK_API_VERSION_1_0
+                    .apiVersion = c.VK_API_VERSION_1_0,
                 }),
                 .enabledLayerCount = instance_layers.len,
                 .ppEnabledLayerNames = &instance_layers,
@@ -354,7 +354,7 @@ const VulkanRendererImpl = struct {
             c.vkGetPhysicalDeviceMemoryProperties(result.physical_device, &result.physical_device_memory_properties);
             c.vkGetPhysicalDeviceProperties(result.physical_device, &result.physical_device_properties);
             const v = result.physical_device_properties;
-            std.debug.print("{s} (Vulkan {}.{}.{})\n", .{v.deviceName, (v.apiVersion >> 22) & 0x7F, (v.apiVersion >> 12) & 0x3F, (v.apiVersion) & 0xFFF});
+            std.debug.print("{s} (Vulkan {}.{}.{})\n", .{ v.deviceName, (v.apiVersion >> 22) & 0x7F, (v.apiVersion >> 12) & 0x3F, (v.apiVersion) & 0xFFF });
         }
         // createSurface()
         switch (platform.WINDOW_LIBRARY) {
@@ -438,13 +438,13 @@ const VulkanRendererImpl = struct {
                         .sType = c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                         .queueFamilyIndex = result.graphics_queue_family_index,
                         .queueCount = 1,
-                        .pQueuePriorities = &[_]f32{1.0}
+                        .pQueuePriorities = &[_]f32{1.0},
                     }),
                     zi(c.VkDeviceQueueCreateInfo, .{
                         .sType = c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                         .queueFamilyIndex = result.graphics_queue_family_index,
                         .queueCount = 1,
-                        .pQueuePriorities = &[_]f32{1.0}
+                        .pQueuePriorities = &[_]f32{1.0},
                     }),
                 },
                 .pEnabledFeatures = &zi(c.VkPhysicalDeviceFeatures, .{}),
@@ -522,7 +522,7 @@ const VulkanRendererImpl = struct {
                     .srcAccessMask = 0,
                     .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                     .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                })
+                }),
             }), null, &result.render_pass));
         }
         var vertex_shader_module: c.VkShaderModule = undefined;
@@ -564,14 +564,14 @@ const VulkanRendererImpl = struct {
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                     .stage = c.VK_SHADER_STAGE_VERTEX_BIT,
                     .module = vertex_shader_module,
-                    .pName = "main"
+                    .pName = "main",
                 }),
                 zi(c.VkPipelineShaderStageCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                     .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT,
                     .module = fragment_shader_module,
-                    .pName = "main"
-                })
+                    .pName = "main",
+                }),
             };
             const topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             const polygon_mode = c.VK_POLYGON_MODE_FILL;
@@ -586,43 +586,43 @@ const VulkanRendererImpl = struct {
                     .vertexBindingDescriptionCount = @intCast(u32, desc.bindings.len),
                     .pVertexBindingDescriptions = &desc.bindings,
                     .vertexAttributeDescriptionCount = @intCast(u32, desc.attributes.len),
-                    .pVertexAttributeDescriptions = &desc.attributes
+                    .pVertexAttributeDescriptions = &desc.attributes,
                 }),
                 .pInputAssemblyState = &zi(c.VkPipelineInputAssemblyStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-                    .topology = topology
+                    .topology = topology,
                 }),
                 .pViewportState = &zi(c.VkPipelineViewportStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
                     .viewportCount = 1,
-                    .scissorCount = 1
+                    .scissorCount = 1,
                 }),
                 .pRasterizationState = &zi(c.VkPipelineRasterizationStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
                     .polygonMode = polygon_mode,
                     .cullMode = c.VK_CULL_MODE_BACK_BIT,
                     .frontFace = c.VK_FRONT_FACE_CLOCKWISE,
-                    .lineWidth = 1.0
+                    .lineWidth = 1.0,
                 }),
                 .pMultisampleState = &zi(c.VkPipelineMultisampleStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-                    .rasterizationSamples = c.VK_SAMPLE_COUNT_1_BIT
+                    .rasterizationSamples = c.VK_SAMPLE_COUNT_1_BIT,
                 }),
                 .pColorBlendState = &zi(c.VkPipelineColorBlendStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
                     .attachmentCount = 1,
                     .pAttachments = &zi(c.VkPipelineColorBlendAttachmentState, .{
-                        .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT|c.VK_COLOR_COMPONENT_G_BIT|c.VK_COLOR_COMPONENT_B_BIT|c.VK_COLOR_COMPONENT_A_BIT
-                    })
+                        .colorWriteMask = c.VK_COLOR_COMPONENT_R_BIT | c.VK_COLOR_COMPONENT_G_BIT | c.VK_COLOR_COMPONENT_B_BIT | c.VK_COLOR_COMPONENT_A_BIT,
+                    }),
                 }),
                 .pDynamicState = &zi(c.VkPipelineDynamicStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                     .dynamicStateCount = 2,
-                    .pDynamicStates = &[_]c.VkDynamicState{c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR}
+                    .pDynamicStates = &[_]c.VkDynamicState{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR },
                 }),
                 .layout = layout,
                 .renderPass = result.render_pass,
-                .subpass = 0
+                .subpass = 0,
             }), null, &result.mesh_graphics_pipeline));
         }
 
@@ -652,7 +652,7 @@ const VulkanRendererImpl = struct {
     fn recordBuffer(self: *VulkanRendererImpl, buffer: c.VkCommandBuffer, image_index: u32) !void {
         try vkCheck(c.vkBeginCommandBuffer(buffer, &zi(c.VkCommandBufferBeginInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+            .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         })));
         c.vkCmdBeginRenderPass(buffer, &zi(c.VkRenderPassBeginInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
@@ -660,10 +660,10 @@ const VulkanRendererImpl = struct {
             .framebuffer = self.framebuffers[image_index],
             .renderArea = .{
                 .offset = .{ .x = 0, .y = 0 },
-                .extent = self.surface_capabilities.currentExtent
+                .extent = self.surface_capabilities.currentExtent,
             },
             .clearValueCount = 1,
-            .pClearValues = &c.VkClearValue{.color = .{.float32 = [_]f32{1.0, 0.0, 1.0, 1.0}}}
+            .pClearValues = &c.VkClearValue{ .color = .{ .float32 = [_]f32{ 1.0, 0.0, 1.0, 1.0 } } },
         }), c.VK_SUBPASS_CONTENTS_INLINE);
         c.vkCmdBindPipeline(buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.mesh_graphics_pipeline);
         c.vkCmdSetViewport(buffer, 0, 1, &zi(c.VkViewport, .{
@@ -672,11 +672,11 @@ const VulkanRendererImpl = struct {
             .width = @intToFloat(f32, self.surface_capabilities.currentExtent.width),
             .height = @intToFloat(f32, self.surface_capabilities.currentExtent.height),
             .minDepth = 0.0,
-            .maxDepth = 1.0
+            .maxDepth = 1.0,
         }));
         c.vkCmdSetScissor(buffer, 0, 1, &zi(c.VkRect2D, .{
             .offset = .{ .x = 0, .y = 0 },
-            .extent = self.surface_capabilities.currentExtent
+            .extent = self.surface_capabilities.currentExtent,
         }));
         c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
         const translate = @Vector(3, f32){ 0.5, 0.0, 0.0 };
@@ -687,7 +687,7 @@ const VulkanRendererImpl = struct {
                 .{ 0.0, scale[1], 0.0, 0.0 },
                 .{ 0.0, 0.0, scale[2], 0.0 },
                 .{ translate[0], translate[1], translate[2], 1.0 },
-            }
+            },
         }));
         c.vkCmdDraw(buffer, self.triangle_mesh.draw_count, 1, 0, 0);
         c.vkCmdEndRenderPass(buffer);
@@ -713,7 +713,7 @@ const VulkanRendererImpl = struct {
             .commandBufferCount = 1,
             .pCommandBuffers = &self.graphics_command_buffers[self.current_frame],
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &self.image_written_semaphores[self.current_frame]
+            .pSignalSemaphores = &self.image_written_semaphores[self.current_frame],
         }), self.currently_rendering_fences[self.current_frame]));
         result = c.vkQueuePresentKHR(self.present_queue, &zi(c.VkPresentInfoKHR, .{
             .sType = c.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
@@ -721,7 +721,7 @@ const VulkanRendererImpl = struct {
             .pWaitSemaphores = &self.image_written_semaphores[self.current_frame],
             .swapchainCount = 1,
             .pSwapchains = &self.swapchain,
-            .pImageIndices = &image_index
+            .pImageIndices = &image_index,
         }));
         switch (result) {
             c.VK_ERROR_OUT_OF_DATE_KHR, c.VK_SUBOPTIMAL_KHR => try self.swapchain_reinit(),
