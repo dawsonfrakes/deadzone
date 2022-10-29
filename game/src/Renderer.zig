@@ -701,7 +701,7 @@ const VulkanRendererImpl = struct {
         switch (result) {
             c.VK_ERROR_OUT_OF_DATE_KHR => return try self.swapchain_reinit(),
             c.VK_SUCCESS, c.VK_SUBOPTIMAL_KHR => {},
-            else => @panic("vkAcquireNextImageKHR"),
+            else => std.debug.panic("vkAcquireNextImageKHR", .{}),
         }
         try vkCheck(c.vkResetFences(self.device, 1, &self.currently_rendering_fences[self.current_frame]));
         try self.recordBuffer(self.graphics_command_buffers[self.current_frame], image_index);
@@ -726,7 +726,7 @@ const VulkanRendererImpl = struct {
         switch (result) {
             c.VK_ERROR_OUT_OF_DATE_KHR, c.VK_SUBOPTIMAL_KHR => try self.swapchain_reinit(),
             c.VK_SUCCESS => {},
-            else => @panic("vkQueuePresentKHR"),
+            else => std.debug.panic("vkQueuePresentKHR", .{}),
         }
         self.current_frame = (self.current_frame + 1) % max_frames_rendering_at_once;
     }
