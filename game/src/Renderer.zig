@@ -38,6 +38,69 @@ pub fn destroy(self: Renderer) void {
     return self.impl.destroy();
 }
 
+// TODO: use structs to make this cleaner (i.e. Faces should use names instead of an array of only brain-known values)
+pub fn parseObj(comptime path: []const u8) ![]Vertex {
+    @setEvalBranchQuota(100000);
+    const file_data = @embedFile(path);
+    var stream = std.io.fixedBufferStream(file_data);
+    const reader = stream.reader();
+
+    const max_line_len = @sizeOf(@TypeOf(file_data.*));
+    var buf: [max_line_len]u8 = undefined;
+
+    var vertices: [max_line_len]@Vector(3, f32) = undefined;
+    var num_vertices: comptime_int = 0;
+    var normals: [max_line_len]@Vector(3, f32) = undefined;
+    var num_normals: comptime_int = 0;
+
+    // [0] = vertex{x, y, z}, [1] = texcoord{x, y, z}, [2] = normal{x, y, z}
+    var faces: [max_line_len][3]@Vector(3, u16) = undefined;
+    var num_faces: comptime_int = 0;
+
+    while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+        var tokens = std.mem.split(u8, line, " ");
+        const cmd = tokens.next().?;
+        if (std.mem.eql(u8, cmd, "v")) {
+            vertices[num_vertices] = .{
+                try std.fmt.parseFloat(f32, tokens.next().?),
+                try std.fmt.parseFloat(f32, tokens.next().?),
+                try std.fmt.parseFloat(f32, tokens.next().?),
+            };
+            num_vertices += 1;
+        } else if (std.mem.eql(u8, cmd, "vn")) {
+            normals[num_normals] = .{
+                try std.fmt.parseFloat(f32, tokens.next().?),
+                try std.fmt.parseFloat(f32, tokens.next().?),
+                try std.fmt.parseFloat(f32, tokens.next().?),
+            };
+            num_normals += 1;
+        } else if (std.mem.eql(u8, cmd, "f")) {
+            // format: v1/t1/n1 v2/t2/n2 v3/t3/n3
+            var index1_tokens = std.mem.split(u8, tokens.next().?, "/");
+            var index2_tokens = std.mem.split(u8, tokens.next().?, "/");
+            var index3_tokens = std.mem.split(u8, tokens.next().?, "/");
+            faces[num_faces] = .{
+                .{ try std.fmt.parseInt(u16, index1_tokens.next().?, 10) - 1, try std.fmt.parseInt(u16, index2_tokens.next().?, 10) - 1, try std.fmt.parseInt(u16, index3_tokens.next().?, 10) - 1 },
+                .{ try std.fmt.parseInt(u16, index1_tokens.next().?, 10) - 1, try std.fmt.parseInt(u16, index2_tokens.next().?, 10) - 1, try std.fmt.parseInt(u16, index3_tokens.next().?, 10) - 1 },
+                .{ try std.fmt.parseInt(u16, index1_tokens.next().?, 10) - 1, try std.fmt.parseInt(u16, index2_tokens.next().?, 10) - 1, try std.fmt.parseInt(u16, index3_tokens.next().?, 10) - 1 },
+            };
+            num_faces += 1;
+        } else {}
+    }
+
+    var result: [num_faces * 3]Vertex = undefined;
+    for (faces[0..num_faces]) |face, i| {
+        result[i * 3 + 0].position = vertices[face[0][0]];
+        result[i * 3 + 0].normal = normals[face[2][0]];
+        result[i * 3 + 1].position = vertices[face[0][1]];
+        result[i * 3 + 1].normal = normals[face[2][1]];
+        result[i * 3 + 2].position = vertices[face[0][2]];
+        result[i * 3 + 2].normal = normals[face[2][2]];
+    }
+
+    return &result;
+}
+
 /// We can't compile error in the `Impl` switch statement as its eagerly evaluated.
 /// So instead, we compile-error on the methods themselves for platforms which don't support rendering.
 const UnsupportedImpl = struct {
