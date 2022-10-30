@@ -2,7 +2,7 @@ const builtin = @import("builtin");
 
 pub const Windowing = enum { xlib, win32 };
 
-pub const WINDOW_LIBRARY: Windowing = switch (builtin.target.os.tag) {
+pub const window_lib: Windowing = switch (builtin.target.os.tag) {
     .linux => .xlib,
     .windows => .win32,
     else => @compileError("OS not yet supported"),
@@ -10,6 +10,6 @@ pub const WINDOW_LIBRARY: Windowing = switch (builtin.target.os.tag) {
 
 pub const Rendering = enum { vulkan };
 
-pub const RENDER_LIBRARY: Rendering = switch (WINDOW_LIBRARY) {
+pub const render_lib: Rendering = switch (window_lib) {
     .xlib, .win32 => .vulkan,
 };

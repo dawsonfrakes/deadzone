@@ -4,57 +4,18 @@ const c = @import("c.zig");
 const Input = @import("Input.zig");
 
 const Window = @This();
-const Impl = switch (platform.WINDOW_LIBRARY) {
+const Impl = switch (platform.window_lib) {
     .xlib => XlibWindowImpl,
-    .win32 => Win32WindowImpl,
+    .win32 => @compileError("Win32WindowImpl is not yet implemented"),
 };
+pub usingnamespace Impl;
 
 impl: Impl,
-
-pub const CreateConfig = struct {
-    x: i16 = 0,
-    y: i16 = 0,
-    width: u16 = 800,
-    height: u16 = 600,
-    input: *Input,
-};
-
-pub fn create(config: CreateConfig) !Window {
-    const impl = try Impl.create(config);
-    return Window{ .impl = impl };
-}
-
-pub fn update(self: *Window) ?void {
-    return self.impl.update();
-}
-
-pub fn destroy(self: Window) void {
-    return self.impl.destroy();
-}
-
-/// We can't compile error in the `Impl` switch statement as its eagerly evaluated.
-/// So instead, we compile-error on the methods themselves for platforms which don't support windowing.
-const UnsupportedImpl = struct {
-    fn create(config: CreateConfig) !Impl {
-        return unsupported(config);
-    }
-
-    fn update(self: *Impl) bool {
-        return unsupported(self);
-    }
-
-    fn destroy(self: Impl) void {
-        return unsupported(self);
-    }
-
-    fn unsupported(unusued: anytype) noreturn {
-        @compileLog("Unsupported operating system", platform.WINDOW_LIBRARY);
-        _ = unusued;
-        unreachable;
-    }
-};
-
-const Win32WindowImpl = UnsupportedImpl;
+x: i16 = 0,
+y: i16 = 0,
+width: u16 = 800,
+height: u16 = 600,
+input: *Input,
 
 const XlibWindowImpl = struct {
     // zig fmt: off
@@ -72,28 +33,27 @@ const XlibWindowImpl = struct {
     dpy: ?*c.Display,
     win: c.Window,
     wm_close: c.Atom,
-    input: *Input,
 
-    fn create(config: CreateConfig) !Impl {
-        var result: XlibWindowImpl = undefined;
-        result.dpy = c.XOpenDisplay(null);
-        try std.testing.expect(result.dpy != null);
-        _ = c.XAutoRepeatOff(result.dpy);
-        const scr = c.XDefaultScreen(result.dpy);
-        const root = c.XRootWindow(result.dpy, scr);
+    pub fn create(input: *Input) !Window {
+        var result: Window = undefined;
+        result.input = input;
+        result.impl.dpy = c.XOpenDisplay(null);
+        try std.testing.expect(result.impl.dpy != null);
+        _ = c.XAutoRepeatOff(result.impl.dpy);
+        const scr = c.XDefaultScreen(result.impl.dpy);
+        const root = c.XRootWindow(result.impl.dpy, scr);
         var s = std.mem.zeroInit(c.XSetWindowAttributes, .{ .event_mask = c.ExposureMask | c.KeyPressMask | c.KeyReleaseMask });
-        result.win = c.XCreateWindow(result.dpy, root, config.x, config.y, config.width, config.height, 0, c.CopyFromParent, c.InputOutput, c.CopyFromParent, c.CWEventMask, &s);
-        result.wm_close = c.XInternAtom(result.dpy, "WM_DELETE_WINDOW", c.False);
-        _ = c.XSetWMProtocols(result.dpy, result.win, &result.wm_close, 1);
-        _ = c.XMapWindow(result.dpy, result.win);
-        result.input = config.input;
+        result.impl.win = c.XCreateWindow(result.impl.dpy, root, result.x, result.y, result.width, result.height, 0, c.CopyFromParent, c.InputOutput, c.CopyFromParent, c.CWEventMask, &s);
+        result.impl.wm_close = c.XInternAtom(result.impl.dpy, "WM_DELETE_WINDOW", c.False);
+        _ = c.XSetWMProtocols(result.impl.dpy, result.impl.win, &result.impl.wm_close, 1);
+        _ = c.XMapWindow(result.impl.dpy, result.impl.win);
         return result;
     }
 
-    fn update(self: *Impl) ?void {
-        while (c.XPending(self.dpy) > 0) {
+    pub fn update(self: *Window) ?void {
+        while (c.XPending(self.impl.dpy) > 0) {
             var ev: c.XEvent = undefined;
-            _ = c.XNextEvent(self.dpy, &ev);
+            _ = c.XNextEvent(self.impl.dpy, &ev);
             switch (ev.@"type") {
                 c.Expose => std.debug.print("Window(w={}, h={})\n", .{ ev.xexpose.width, ev.xexpose.height }),
                 c.KeyPress, c.KeyRelease => {
@@ -106,16 +66,16 @@ const XlibWindowImpl = struct {
                     }
                 },
                 c.MappingNotify => _ = c.XRefreshKeyboardMapping(&ev.xmapping),
-                c.ClientMessage => if (ev.xclient.data.l[0] == self.wm_close) return null,
+                c.ClientMessage => if (ev.xclient.data.l[0] == self.impl.wm_close) return null,
                 c.DestroyNotify => return null,
                 else => {},
             }
         }
     }
 
-    fn destroy(self: Impl) void {
-        _ = c.XDestroyWindow(self.dpy, self.win);
-        _ = c.XAutoRepeatOn(self.dpy);
-        _ = c.XCloseDisplay(self.dpy);
+    pub fn destroy(self: Window) void {
+        _ = c.XDestroyWindow(self.impl.dpy, self.impl.win);
+        _ = c.XAutoRepeatOn(self.impl.dpy);
+        _ = c.XCloseDisplay(self.impl.dpy);
     }
 };

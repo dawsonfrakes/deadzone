@@ -9,11 +9,11 @@ pub fn build(b: *std.build.Builder) void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.linkLibC();
-    switch (platform.WINDOW_LIBRARY) {
+    switch (platform.window_lib) {
         .xlib => exe.linkSystemLibrary("X11"),
         .win32 => @compileError("WIN32 not yet supported"),
     }
-    switch (platform.RENDER_LIBRARY) {
+    switch (platform.render_lib) {
         .vulkan => exe.linkSystemLibrary("vulkan"),
     }
     exe.install();
@@ -28,8 +28,8 @@ pub fn build(b: *std.build.Builder) void {
     run_step.dependOn(&run_cmd.step);
 
     const shaders_step = b.step("shaders", "Compile SPIR-V shaders");
-    const vshad = b.addSystemCommand(&[_][]const u8{"glslc", "src/shaders/mesh.vert", "-o", "src/shaders/mesh.vert.spv"});
-    const fshad = b.addSystemCommand(&[_][]const u8{"glslc", "src/shaders/mesh.frag", "-o", "src/shaders/mesh.frag.spv"});
+    const vshad = b.addSystemCommand(&[_][]const u8{ "glslc", "src/shaders/mesh.vert", "-o", "src/shaders/mesh.vert.spv" });
+    const fshad = b.addSystemCommand(&[_][]const u8{ "glslc", "src/shaders/mesh.frag", "-o", "src/shaders/mesh.frag.spv" });
     shaders_step.dependOn(&vshad.step);
     shaders_step.dependOn(&fshad.step);
 

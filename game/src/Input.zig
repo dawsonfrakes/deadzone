@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const Input = @This();
 
 // zig fmt: off

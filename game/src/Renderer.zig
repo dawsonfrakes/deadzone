@@ -5,11 +5,13 @@ const Window = @import("Window.zig");
 const Time = @import("Time.zig");
 
 const Renderer = @This();
-const Impl = switch (platform.RENDER_LIBRARY) {
+const Impl = switch (platform.render_lib) {
     .vulkan => VulkanRendererImpl,
 };
+pub usingnamespace Impl;
 
 impl: Impl,
+time: *const Time,
 
 const Vertex = struct {
     position: @Vector(3, f32),
@@ -21,24 +23,6 @@ const MeshPushConstants = struct {
     data: @Vector(4, f32),
     render_matrix: [4]@Vector(4, f32),
 };
-
-pub const CreateConfig = struct {
-    window: *const Window,
-    time: *const Time,
-};
-
-pub fn create(config: CreateConfig) !Renderer {
-    const impl = try Impl.create(config);
-    return Renderer{ .impl = impl };
-}
-
-pub fn update(self: *Renderer) !void {
-    try self.impl.update();
-}
-
-pub fn destroy(self: Renderer) void {
-    return self.impl.destroy();
-}
 
 // TODO: use structs to make this cleaner (i.e. Faces should use names instead of an array of only brain-known values)
 pub fn parseObj(comptime path: []const u8) ![]Vertex {
@@ -106,34 +90,10 @@ pub fn parseObj(comptime path: []const u8) ![]Vertex {
     return &result;
 }
 
-/// We can't compile error in the `Impl` switch statement as its eagerly evaluated.
-/// So instead, we compile-error on the methods themselves for platforms which don't support rendering.
-const UnsupportedImpl = struct {
-    fn create(config: CreateConfig) !Impl {
-        return unsupported(config);
-    }
-
-    fn update(self: *Impl) !void {
-        return unsupported(self);
-    }
-
-    fn destroy(self: Impl) void {
-        return unsupported(self);
-    }
-
-    fn unsupported(unusued: anytype) noreturn {
-        @compileLog("Unsupported operating system", platform.RENDER_LIBRARY);
-        _ = unusued;
-        unreachable;
-    }
-};
-
 const VulkanRendererImpl = struct {
     const zi = std.mem.zeroInit;
     const max_frames_rendering_at_once = 2;
     const max_swapchain_images = 10;
-
-    time: *const Time,
 
     instance: c.VkInstance,
     physical_device: c.VkPhysicalDevice,
@@ -293,56 +253,56 @@ const VulkanRendererImpl = struct {
         }
     };
 
-    fn swapchain_init(self: *VulkanRendererImpl) !void {
+    fn swapchain_init(self: *Renderer) !void {
         // getSurfaceInfo()
         {
-            try vkCheck(c.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(self.physical_device, self.surface, &self.surface_capabilities));
+            try vkCheck(c.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(self.impl.physical_device, self.impl.surface, &self.impl.surface_capabilities));
         }
         // getMinimumImageCount()
         {
-            self.image_count = std.math.max(self.surface_capabilities.minImageCount, max_frames_rendering_at_once);
-            if (self.surface_capabilities.maxImageCount > 0) {
-                self.image_count = std.math.min(self.image_count, self.surface_capabilities.maxImageCount);
+            self.impl.image_count = std.math.max(self.impl.surface_capabilities.minImageCount, max_frames_rendering_at_once);
+            if (self.impl.surface_capabilities.maxImageCount > 0) {
+                self.impl.image_count = std.math.min(self.impl.image_count, self.impl.surface_capabilities.maxImageCount);
             }
         }
         // createSwapchain()
         {
             const same_family = self.isSameQueueFamily();
-            try vkCheck(c.vkCreateSwapchainKHR(self.device, &zi(c.VkSwapchainCreateInfoKHR, .{
+            try vkCheck(c.vkCreateSwapchainKHR(self.impl.device, &zi(c.VkSwapchainCreateInfoKHR, .{
                 .sType = c.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-                .surface = self.surface,
-                .minImageCount = self.image_count,
-                .imageFormat = self.surface_format.format,
-                .imageColorSpace = self.surface_format.colorSpace,
-                .imageExtent = self.surface_capabilities.currentExtent,
+                .surface = self.impl.surface,
+                .minImageCount = self.impl.image_count,
+                .imageFormat = self.impl.surface_format.format,
+                .imageColorSpace = self.impl.surface_format.colorSpace,
+                .imageExtent = self.impl.surface_capabilities.currentExtent,
                 .imageArrayLayers = 1,
                 .imageUsage = c.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
                 .imageSharingMode = if (same_family) @as(c.VkSharingMode, c.VK_SHARING_MODE_EXCLUSIVE) else @as(c.VkSharingMode, c.VK_SHARING_MODE_CONCURRENT),
                 .queueFamilyIndexCount = if (same_family) @as(u32, 0) else @as(u32, 2),
-                .pQueueFamilyIndices = &[_]u32{ self.graphics_queue_family_index, self.present_queue_family_index },
+                .pQueueFamilyIndices = &[_]u32{ self.impl.graphics_queue_family_index, self.impl.present_queue_family_index },
                 .preTransform = c.VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR,
                 .compositeAlpha = c.VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-                .presentMode = self.surface_present_mode,
+                .presentMode = self.impl.surface_present_mode,
                 .clipped = c.VK_TRUE,
                 .oldSwapchain = @ptrCast(c.VkSwapchainKHR, c.VK_NULL_HANDLE),
-            }), null, &self.swapchain));
+            }), null, &self.impl.swapchain));
         }
         // getSwapchainImageAndFinalImageCount()
         {
-            try vkCheck(c.vkGetSwapchainImagesKHR(self.device, self.swapchain, &self.image_count, null));
-            std.debug.assert(self.image_count > 0 and self.image_count < max_swapchain_images);
-            try vkCheck(c.vkGetSwapchainImagesKHR(self.device, self.swapchain, &self.image_count, &self.swapchain_images));
-            std.debug.print("Swapchain(image_count={})\n", .{self.image_count});
+            try vkCheck(c.vkGetSwapchainImagesKHR(self.impl.device, self.impl.swapchain, &self.impl.image_count, null));
+            std.debug.assert(self.impl.image_count > 0 and self.impl.image_count < max_swapchain_images);
+            try vkCheck(c.vkGetSwapchainImagesKHR(self.impl.device, self.impl.swapchain, &self.impl.image_count, &self.impl.swapchain_images));
+            std.debug.print("Swapchain(image_count={})\n", .{self.impl.image_count});
         }
         // createImageViews()
         {
             var i: usize = 0;
-            while (i < self.image_count) : (i += 1) {
-                try vkCheck(c.vkCreateImageView(self.device, &zi(c.VkImageViewCreateInfo, .{
+            while (i < self.impl.image_count) : (i += 1) {
+                try vkCheck(c.vkCreateImageView(self.impl.device, &zi(c.VkImageViewCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                    .image = self.swapchain_images[i],
+                    .image = self.impl.swapchain_images[i],
                     .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
-                    .format = self.surface_format.format,
+                    .format = self.impl.surface_format.format,
                     .components = .{
                         .r = c.VK_COMPONENT_SWIZZLE_IDENTITY,
                         .g = c.VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -356,49 +316,49 @@ const VulkanRendererImpl = struct {
                         .baseArrayLayer = 0,
                         .layerCount = 1,
                     },
-                }), null, &self.swapchain_image_views[i]));
+                }), null, &self.impl.swapchain_image_views[i]));
             }
         }
         // createFramebuffers()
         {
             var i: usize = 0;
-            while (i < self.image_count) : (i += 1) {
-                try vkCheck(c.vkCreateFramebuffer(self.device, &zi(c.VkFramebufferCreateInfo, .{
+            while (i < self.impl.image_count) : (i += 1) {
+                try vkCheck(c.vkCreateFramebuffer(self.impl.device, &zi(c.VkFramebufferCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-                    .renderPass = self.render_pass,
+                    .renderPass = self.impl.render_pass,
                     .attachmentCount = 1,
-                    .pAttachments = &self.swapchain_image_views[i],
-                    .width = self.surface_capabilities.currentExtent.width,
-                    .height = self.surface_capabilities.currentExtent.height,
+                    .pAttachments = &self.impl.swapchain_image_views[i],
+                    .width = self.impl.surface_capabilities.currentExtent.width,
+                    .height = self.impl.surface_capabilities.currentExtent.height,
                     .layers = 1,
-                }), null, &self.framebuffers[i]));
+                }), null, &self.impl.framebuffers[i]));
             }
         }
     }
 
-    fn swapchain_deinit(self: VulkanRendererImpl) void {
-        _ = c.vkDeviceWaitIdle(self.device);
+    fn swapchain_deinit(self: Renderer) void {
+        _ = c.vkDeviceWaitIdle(self.impl.device);
         var i: usize = 0;
-        while (i < self.image_count) : (i += 1) {
-            c.vkDestroyFramebuffer(self.device, self.framebuffers[i], null);
-            c.vkDestroyImageView(self.device, self.swapchain_image_views[i], null);
+        while (i < self.impl.image_count) : (i += 1) {
+            c.vkDestroyFramebuffer(self.impl.device, self.impl.framebuffers[i], null);
+            c.vkDestroyImageView(self.impl.device, self.impl.swapchain_image_views[i], null);
         }
-        c.vkDestroySwapchainKHR(self.device, self.swapchain, null);
+        c.vkDestroySwapchainKHR(self.impl.device, self.impl.swapchain, null);
     }
 
-    fn swapchain_reinit(self: *VulkanRendererImpl) !void {
+    fn swapchain_reinit(self: *Renderer) !void {
         self.swapchain_deinit();
         try self.swapchain_init();
     }
 
-    fn isSameQueueFamily(self: VulkanRendererImpl) bool {
-        return self.graphics_queue_family_index == self.present_queue_family_index;
+    fn isSameQueueFamily(self: Renderer) bool {
+        return self.impl.graphics_queue_family_index == self.impl.present_queue_family_index;
     }
 
-    fn create(config: CreateConfig) !VulkanRendererImpl {
-        var result: VulkanRendererImpl = undefined;
-        result.time = config.time;
-        result.current_frame = 0;
+    pub fn create(window: *const Window, time: *const Time) !Renderer {
+        var result: Renderer = undefined;
+        result.time = time;
+        result.impl.current_frame = 0;
         // createInstance()
         {
             const instance_layers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
@@ -413,36 +373,36 @@ const VulkanRendererImpl = struct {
                 .ppEnabledLayerNames = &instance_layers,
                 .enabledExtensionCount = instance_extensions.len,
                 .ppEnabledExtensionNames = &instance_extensions,
-            }), null, &result.instance));
+            }), null, &result.impl.instance));
         }
         // selectPhysicalDevice()
         {
             var count: u32 = 1;
-            try vkCheck(c.vkEnumeratePhysicalDevices(result.instance, &count, &result.physical_device));
+            try vkCheck(c.vkEnumeratePhysicalDevices(result.impl.instance, &count, &result.impl.physical_device));
             std.debug.assert(count == 1);
         }
         // getPhysicalDeviceInfo()
         {
-            c.vkGetPhysicalDeviceMemoryProperties(result.physical_device, &result.physical_device_memory_properties);
-            c.vkGetPhysicalDeviceProperties(result.physical_device, &result.physical_device_properties);
-            const v = result.physical_device_properties;
+            c.vkGetPhysicalDeviceMemoryProperties(result.impl.physical_device, &result.impl.physical_device_memory_properties);
+            c.vkGetPhysicalDeviceProperties(result.impl.physical_device, &result.impl.physical_device_properties);
+            const v = result.impl.physical_device_properties;
             std.debug.print("{s} (Vulkan {}.{}.{})\n", .{ v.deviceName, (v.apiVersion >> 22) & 0x7F, (v.apiVersion >> 12) & 0x3F, (v.apiVersion) & 0xFFF });
         }
         // createSurface()
-        switch (platform.WINDOW_LIBRARY) {
-            .xlib => try vkCheck(c.vkCreateXlibSurfaceKHR(result.instance, &zi(c.VkXlibSurfaceCreateInfoKHR, .{
+        switch (platform.window_lib) {
+            .xlib => try vkCheck(c.vkCreateXlibSurfaceKHR(result.impl.instance, &zi(c.VkXlibSurfaceCreateInfoKHR, .{
                 .sType = c.VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
-                .dpy = config.window.impl.dpy,
-                .window = config.window.impl.win,
-            }), null, &result.surface)),
+                .dpy = window.impl.dpy,
+                .window = window.impl.win,
+            }), null, &result.impl.surface)),
             else => std.debug.print("Windowing system not supported by Vulkan\n", .{}),
         }
         // selectSurfaceFormat()
-        result.surface_format = blk: {
+        result.impl.surface_format = blk: {
             const max_count = 128;
             var count: u32 = max_count;
             var formats: [max_count]c.VkSurfaceFormatKHR = undefined;
-            try vkCheck(c.vkGetPhysicalDeviceSurfaceFormatsKHR(result.physical_device, result.surface, &count, &formats));
+            try vkCheck(c.vkGetPhysicalDeviceSurfaceFormatsKHR(result.impl.physical_device, result.impl.surface, &count, &formats));
             std.debug.assert(count > 0);
 
             const preferred_format = c.VK_FORMAT_B8G8R8A8_UNORM;
@@ -456,11 +416,11 @@ const VulkanRendererImpl = struct {
             }
             break :blk formats[0];
         };
-        result.surface_present_mode = blk: {
+        result.impl.surface_present_mode = blk: {
             const max_count = 128;
             var count: u32 = max_count;
             var present_modes: [max_count]c.VkPresentModeKHR = undefined;
-            try vkCheck(c.vkGetPhysicalDeviceSurfacePresentModesKHR(result.physical_device, result.surface, &count, &present_modes));
+            try vkCheck(c.vkGetPhysicalDeviceSurfacePresentModesKHR(result.impl.physical_device, result.impl.surface, &count, &present_modes));
             std.debug.assert(count > 0);
 
             const preferred_present_mode = c.VK_PRESENT_MODE_MAILBOX_KHR;
@@ -476,10 +436,10 @@ const VulkanRendererImpl = struct {
             const max_count = 128;
             var count: u32 = max_count;
             var queue_families: [max_count]c.VkQueueFamilyProperties = undefined;
-            c.vkGetPhysicalDeviceQueueFamilyProperties(result.physical_device, &count, &queue_families);
+            c.vkGetPhysicalDeviceQueueFamilyProperties(result.impl.physical_device, &count, &queue_families);
             std.debug.assert(count > 0);
 
-            result.graphics_queue_family_index = blk: {
+            result.impl.graphics_queue_family_index = blk: {
                 for (queue_families[0..count]) |queue_family, i| {
                     if (queue_family.queueCount == 0) continue;
                     if ((queue_family.queueFlags & c.VK_QUEUE_GRAPHICS_BIT) > 0)
@@ -488,11 +448,11 @@ const VulkanRendererImpl = struct {
                 return error.QueueNotFound;
             };
 
-            result.present_queue_family_index = blk: {
+            result.impl.present_queue_family_index = blk: {
                 for (queue_families[0..count]) |queue_family, i| {
                     if (queue_family.queueCount == 0) continue;
                     var present_supported: c.VkBool32 = c.VK_FALSE;
-                    try vkCheck(c.vkGetPhysicalDeviceSurfaceSupportKHR(result.physical_device, @intCast(u32, i), result.surface, &present_supported));
+                    try vkCheck(c.vkGetPhysicalDeviceSurfaceSupportKHR(result.impl.physical_device, @intCast(u32, i), result.impl.surface, &present_supported));
                     if (present_supported == c.VK_TRUE)
                         break :blk @intCast(u32, i);
                 }
@@ -502,19 +462,19 @@ const VulkanRendererImpl = struct {
         // createDevice()
         {
             const device_extensions = [_][*c]const u8{c.VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-            try vkCheck(c.vkCreateDevice(result.physical_device, &zi(c.VkDeviceCreateInfo, .{
+            try vkCheck(c.vkCreateDevice(result.impl.physical_device, &zi(c.VkDeviceCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
                 .queueCreateInfoCount = if (result.isSameQueueFamily()) @as(u32, 1) else @as(u32, 2),
                 .pQueueCreateInfos = &[_]c.VkDeviceQueueCreateInfo{
                     zi(c.VkDeviceQueueCreateInfo, .{
                         .sType = c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                        .queueFamilyIndex = result.graphics_queue_family_index,
+                        .queueFamilyIndex = result.impl.graphics_queue_family_index,
                         .queueCount = 1,
                         .pQueuePriorities = &[_]f32{1.0},
                     }),
                     zi(c.VkDeviceQueueCreateInfo, .{
                         .sType = c.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                        .queueFamilyIndex = result.graphics_queue_family_index,
+                        .queueFamilyIndex = result.impl.graphics_queue_family_index,
                         .queueCount = 1,
                         .pQueuePriorities = &[_]f32{1.0},
                     }),
@@ -522,29 +482,29 @@ const VulkanRendererImpl = struct {
                 .pEnabledFeatures = &zi(c.VkPhysicalDeviceFeatures, .{}),
                 .enabledExtensionCount = device_extensions.len,
                 .ppEnabledExtensionNames = &device_extensions,
-            }), null, &result.device));
+            }), null, &result.impl.device));
         }
         // getQueueHandles()
         {
-            c.vkGetDeviceQueue(result.device, result.graphics_queue_family_index, 0, &result.graphics_queue);
-            c.vkGetDeviceQueue(result.device, result.present_queue_family_index, 0, &result.present_queue);
+            c.vkGetDeviceQueue(result.impl.device, result.impl.graphics_queue_family_index, 0, &result.impl.graphics_queue);
+            c.vkGetDeviceQueue(result.impl.device, result.impl.present_queue_family_index, 0, &result.impl.present_queue);
         }
         // createCommandPool()
         {
-            try vkCheck(c.vkCreateCommandPool(result.device, &zi(c.VkCommandPoolCreateInfo, .{
+            try vkCheck(c.vkCreateCommandPool(result.impl.device, &zi(c.VkCommandPoolCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                 .flags = c.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                .queueFamilyIndex = result.graphics_queue_family_index,
-            }), null, &result.graphics_command_pool));
+                .queueFamilyIndex = result.impl.graphics_queue_family_index,
+            }), null, &result.impl.graphics_command_pool));
         }
         // createCommandBuffers()
         {
-            try vkCheck(c.vkAllocateCommandBuffers(result.device, &zi(c.VkCommandBufferAllocateInfo, .{
+            try vkCheck(c.vkAllocateCommandBuffers(result.impl.device, &zi(c.VkCommandBufferAllocateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-                .commandPool = result.graphics_command_pool,
+                .commandPool = result.impl.graphics_command_pool,
                 .level = c.VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                 .commandBufferCount = max_frames_rendering_at_once,
-            }), &result.graphics_command_buffers));
+            }), &result.impl.graphics_command_buffers));
         }
         // createSyncObjects()
         {
@@ -557,18 +517,18 @@ const VulkanRendererImpl = struct {
                 .flags = c.VK_FENCE_CREATE_SIGNALED_BIT,
             });
             while (i < max_frames_rendering_at_once) : (i += 1) {
-                try vkCheck(c.vkCreateSemaphore(result.device, &semaphore_create_info, null, &result.image_acquired_semaphores[i]));
-                try vkCheck(c.vkCreateSemaphore(result.device, &semaphore_create_info, null, &result.image_written_semaphores[i]));
-                try vkCheck(c.vkCreateFence(result.device, &fence_create_info, null, &result.currently_rendering_fences[i]));
+                try vkCheck(c.vkCreateSemaphore(result.impl.device, &semaphore_create_info, null, &result.impl.image_acquired_semaphores[i]));
+                try vkCheck(c.vkCreateSemaphore(result.impl.device, &semaphore_create_info, null, &result.impl.image_written_semaphores[i]));
+                try vkCheck(c.vkCreateFence(result.impl.device, &fence_create_info, null, &result.impl.currently_rendering_fences[i]));
             }
         }
         // createRenderPass()
         {
-            try vkCheck(c.vkCreateRenderPass(result.device, &zi(c.VkRenderPassCreateInfo, .{
+            try vkCheck(c.vkCreateRenderPass(result.impl.device, &zi(c.VkRenderPassCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
                 .attachmentCount = 1,
                 .pAttachments = &zi(c.VkAttachmentDescription, .{
-                    .format = result.surface_format.format,
+                    .format = result.impl.surface_format.format,
                     .samples = c.VK_SAMPLE_COUNT_1_BIT,
                     .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
                     .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
@@ -595,31 +555,31 @@ const VulkanRendererImpl = struct {
                     .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                     .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                 }),
-            }), null, &result.render_pass));
+            }), null, &result.impl.render_pass));
         }
         var vertex_shader_module: c.VkShaderModule = undefined;
         var fragment_shader_module: c.VkShaderModule = undefined;
         // createShaders()
         {
             const vertex_shader_code = @alignCast(4, @embedFile("shaders/mesh.vert.spv"));
-            try vkCheck(c.vkCreateShaderModule(result.device, &zi(c.VkShaderModuleCreateInfo, .{
+            try vkCheck(c.vkCreateShaderModule(result.impl.device, &zi(c.VkShaderModuleCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
                 .codeSize = vertex_shader_code.len,
                 .pCode = @ptrCast(*const u32, vertex_shader_code),
             }), null, &vertex_shader_module));
 
             const fragment_shader_code = @alignCast(4, @embedFile("shaders/mesh.frag.spv"));
-            try vkCheck(c.vkCreateShaderModule(result.device, &zi(c.VkShaderModuleCreateInfo, .{
+            try vkCheck(c.vkCreateShaderModule(result.impl.device, &zi(c.VkShaderModuleCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
                 .codeSize = fragment_shader_code.len,
                 .pCode = @ptrCast(*const u32, fragment_shader_code),
             }), null, &fragment_shader_module));
         }
-        defer c.vkDestroyShaderModule(result.device, vertex_shader_module, null);
-        defer c.vkDestroyShaderModule(result.device, fragment_shader_module, null);
+        defer c.vkDestroyShaderModule(result.impl.device, vertex_shader_module, null);
+        defer c.vkDestroyShaderModule(result.impl.device, fragment_shader_module, null);
         // createGraphicsPipelineLayout()
         {
-            try vkCheck(c.vkCreatePipelineLayout(result.device, &zi(c.VkPipelineLayoutCreateInfo, .{
+            try vkCheck(c.vkCreatePipelineLayout(result.impl.device, &zi(c.VkPipelineLayoutCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                 .pushConstantRangeCount = 1,
                 .pPushConstantRanges = &zi(c.VkPushConstantRange, .{
@@ -627,7 +587,7 @@ const VulkanRendererImpl = struct {
                     .offset = 0,
                     .size = @sizeOf(MeshPushConstants),
                 }),
-            }), null, &result.mesh_graphics_pipeline_layout));
+            }), null, &result.impl.mesh_graphics_pipeline_layout));
         }
         // createGraphicsPipeline()
         {
@@ -647,9 +607,9 @@ const VulkanRendererImpl = struct {
             };
             const topology = c.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
             const polygon_mode = c.VK_POLYGON_MODE_FILL;
-            const layout = result.mesh_graphics_pipeline_layout;
+            const layout = result.impl.mesh_graphics_pipeline_layout;
             const desc = comptime VertexInputDescription(Vertex).init();
-            try vkCheck(c.vkCreateGraphicsPipelines(result.device, null, 1, &zi(c.VkGraphicsPipelineCreateInfo, .{
+            try vkCheck(c.vkCreateGraphicsPipelines(result.impl.device, null, 1, &zi(c.VkGraphicsPipelineCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                 .stageCount = stages.len,
                 .pStages = &stages,
@@ -693,12 +653,12 @@ const VulkanRendererImpl = struct {
                     .pDynamicStates = &[_]c.VkDynamicState{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR },
                 }),
                 .layout = layout,
-                .renderPass = result.render_pass,
+                .renderPass = result.impl.render_pass,
                 .subpass = 0,
-            }), null, &result.mesh_graphics_pipeline));
+            }), null, &result.impl.mesh_graphics_pipeline));
         }
 
-        result.triangle_mesh = try Mesh.create(&result, &[_]Vertex{
+        result.impl.triangle_mesh = try Mesh.create(&result.impl, &[_]Vertex{
             .{
                 .position = .{ 1.0, 1.0, 0.0 },
                 .normal = .{ 0.0, 0.0, 0.0 },
@@ -716,47 +676,56 @@ const VulkanRendererImpl = struct {
             },
         });
 
-        result.cube_mesh = try Mesh.create(&result, try comptime parseObj("cube.obj"));
+        result.impl.cube_mesh = try Mesh.create(&result.impl, try comptime parseObj("cube.obj"));
 
         try result.swapchain_init();
 
         return result;
     }
 
-    fn recordBuffer(self: *VulkanRendererImpl, buffer: c.VkCommandBuffer, image_index: u32) !void {
+    fn recordBuffer(self: *Renderer, buffer: c.VkCommandBuffer, image_index: u32) !void {
         try vkCheck(c.vkBeginCommandBuffer(buffer, &zi(c.VkCommandBufferBeginInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .flags = c.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         })));
         c.vkCmdBeginRenderPass(buffer, &zi(c.VkRenderPassBeginInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .renderPass = self.render_pass,
-            .framebuffer = self.framebuffers[image_index],
+            .renderPass = self.impl.render_pass,
+            .framebuffer = self.impl.framebuffers[image_index],
             .renderArea = .{
                 .offset = .{ .x = 0, .y = 0 },
-                .extent = self.surface_capabilities.currentExtent,
+                .extent = self.impl.surface_capabilities.currentExtent,
             },
             .clearValueCount = 1,
             .pClearValues = &c.VkClearValue{ .color = .{ .float32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 } } },
         }), c.VK_SUBPASS_CONTENTS_INLINE);
-        c.vkCmdBindPipeline(buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.mesh_graphics_pipeline);
+        c.vkCmdBindPipeline(buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.impl.mesh_graphics_pipeline);
         c.vkCmdSetViewport(buffer, 0, 1, &zi(c.VkViewport, .{
             .x = 0.0,
             .y = 0.0,
-            .width = @intToFloat(f32, self.surface_capabilities.currentExtent.width),
-            .height = @intToFloat(f32, self.surface_capabilities.currentExtent.height),
+            .width = @intToFloat(f32, self.impl.surface_capabilities.currentExtent.width),
+            .height = @intToFloat(f32, self.impl.surface_capabilities.currentExtent.height),
             .minDepth = 0.0,
             .maxDepth = 1.0,
         }));
         c.vkCmdSetScissor(buffer, 0, 1, &zi(c.VkRect2D, .{
             .offset = .{ .x = 0, .y = 0 },
-            .extent = self.surface_capabilities.currentExtent,
+            .extent = self.impl.surface_capabilities.currentExtent,
         }));
-        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
+            .render_matrix = [_]@Vector(4, f32){
+                .{ 1.0, 0.0, 0.0, 0.0 },
+                .{ 0.0, 1.0, 0.0, 0.0 },
+                .{ 0.0, 0.0, 1.0, 0.0 },
+                .{ 0.0, 0.0, 0.0, 1.0 },
+            },
+        }));
+        c.vkCmdDraw(buffer, self.impl.triangle_mesh.draw_count, 1, 0, 0);
         const x = std.math.sin(@floatCast(f32, self.time.running)) / 2.0;
         const translate = @Vector(3, f32){ x, 0.0, 0.0 };
         const scale = @Vector(3, f32){ 0.5, 0.5, 1.0 };
-        c.vkCmdPushConstants(buffer, self.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
+        c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
             .render_matrix = [_]@Vector(4, f32){
                 .{ scale[0], 0.0, 0.0, 0.0 },
                 .{ 0.0, scale[1], 0.0, 0.0 },
@@ -764,40 +733,39 @@ const VulkanRendererImpl = struct {
                 .{ translate[0], translate[1], translate[2], 1.0 },
             },
         }));
-        c.vkCmdDraw(buffer, self.triangle_mesh.draw_count, 1, 0, 0);
-        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.cube_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
-        c.vkCmdDraw(buffer, self.cube_mesh.draw_count, 1, 0, 0);
+        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.cube_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        c.vkCmdDraw(buffer, self.impl.cube_mesh.draw_count, 1, 0, 0);
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
     }
 
-    fn update(self: *VulkanRendererImpl) !void {
-        try vkCheck(c.vkWaitForFences(self.device, 1, &self.currently_rendering_fences[self.current_frame], c.VK_TRUE, std.math.maxInt(u64)));
+    pub fn update(self: *Renderer) !void {
+        try vkCheck(c.vkWaitForFences(self.impl.device, 1, &self.impl.currently_rendering_fences[self.impl.current_frame], c.VK_TRUE, std.math.maxInt(u64)));
         var image_index: u32 = undefined;
-        var result = c.vkAcquireNextImageKHR(self.device, self.swapchain, std.math.maxInt(u64), self.image_acquired_semaphores[self.current_frame], @ptrCast(c.VkFence, c.VK_NULL_HANDLE), &image_index);
+        var result = c.vkAcquireNextImageKHR(self.impl.device, self.impl.swapchain, std.math.maxInt(u64), self.impl.image_acquired_semaphores[self.impl.current_frame], @ptrCast(c.VkFence, c.VK_NULL_HANDLE), &image_index);
         switch (result) {
             c.VK_ERROR_OUT_OF_DATE_KHR => return try self.swapchain_reinit(),
             c.VK_SUCCESS, c.VK_SUBOPTIMAL_KHR => {},
             else => std.debug.panic("vkAcquireNextImageKHR", .{}),
         }
-        try vkCheck(c.vkResetFences(self.device, 1, &self.currently_rendering_fences[self.current_frame]));
-        try self.recordBuffer(self.graphics_command_buffers[self.current_frame], image_index);
-        try vkCheck(c.vkQueueSubmit(self.graphics_queue, 1, &zi(c.VkSubmitInfo, .{
+        try vkCheck(c.vkResetFences(self.impl.device, 1, &self.impl.currently_rendering_fences[self.impl.current_frame]));
+        try self.recordBuffer(self.impl.graphics_command_buffers[self.impl.current_frame], image_index);
+        try vkCheck(c.vkQueueSubmit(self.impl.graphics_queue, 1, &zi(c.VkSubmitInfo, .{
             .sType = c.VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &self.image_acquired_semaphores[self.current_frame],
+            .pWaitSemaphores = &self.impl.image_acquired_semaphores[self.impl.current_frame],
             .pWaitDstStageMask = &[_]c.VkPipelineStageFlags{c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT},
             .commandBufferCount = 1,
-            .pCommandBuffers = &self.graphics_command_buffers[self.current_frame],
+            .pCommandBuffers = &self.impl.graphics_command_buffers[self.impl.current_frame],
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &self.image_written_semaphores[self.current_frame],
-        }), self.currently_rendering_fences[self.current_frame]));
-        result = c.vkQueuePresentKHR(self.present_queue, &zi(c.VkPresentInfoKHR, .{
+            .pSignalSemaphores = &self.impl.image_written_semaphores[self.impl.current_frame],
+        }), self.impl.currently_rendering_fences[self.impl.current_frame]));
+        result = c.vkQueuePresentKHR(self.impl.present_queue, &zi(c.VkPresentInfoKHR, .{
             .sType = c.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &self.image_written_semaphores[self.current_frame],
+            .pWaitSemaphores = &self.impl.image_written_semaphores[self.impl.current_frame],
             .swapchainCount = 1,
-            .pSwapchains = &self.swapchain,
+            .pSwapchains = &self.impl.swapchain,
             .pImageIndices = &image_index,
         }));
         switch (result) {
@@ -805,25 +773,25 @@ const VulkanRendererImpl = struct {
             c.VK_SUCCESS => {},
             else => std.debug.panic("vkQueuePresentKHR", .{}),
         }
-        self.current_frame = (self.current_frame + 1) % max_frames_rendering_at_once;
+        self.impl.current_frame = (self.impl.current_frame + 1) % max_frames_rendering_at_once;
     }
 
-    fn destroy(self: VulkanRendererImpl) void {
+    pub fn destroy(self: Renderer) void {
         swapchain_deinit(self);
-        self.cube_mesh.destroy();
-        self.triangle_mesh.destroy();
-        c.vkDestroyPipeline(self.device, self.mesh_graphics_pipeline, null);
-        c.vkDestroyPipelineLayout(self.device, self.mesh_graphics_pipeline_layout, null);
-        c.vkDestroyRenderPass(self.device, self.render_pass, null);
+        self.impl.cube_mesh.destroy();
+        self.impl.triangle_mesh.destroy();
+        c.vkDestroyPipeline(self.impl.device, self.impl.mesh_graphics_pipeline, null);
+        c.vkDestroyPipelineLayout(self.impl.device, self.impl.mesh_graphics_pipeline_layout, null);
+        c.vkDestroyRenderPass(self.impl.device, self.impl.render_pass, null);
         var i: usize = 0;
         while (i < max_frames_rendering_at_once) : (i += 1) {
-            c.vkDestroyFence(self.device, self.currently_rendering_fences[i], null);
-            c.vkDestroySemaphore(self.device, self.image_written_semaphores[i], null);
-            c.vkDestroySemaphore(self.device, self.image_acquired_semaphores[i], null);
+            c.vkDestroyFence(self.impl.device, self.impl.currently_rendering_fences[i], null);
+            c.vkDestroySemaphore(self.impl.device, self.impl.image_written_semaphores[i], null);
+            c.vkDestroySemaphore(self.impl.device, self.impl.image_acquired_semaphores[i], null);
         }
-        c.vkDestroyCommandPool(self.device, self.graphics_command_pool, null);
-        c.vkDestroyDevice(self.device, null);
-        c.vkDestroySurfaceKHR(self.instance, self.surface, null);
-        c.vkDestroyInstance(self.instance, null);
+        c.vkDestroyCommandPool(self.impl.device, self.impl.graphics_command_pool, null);
+        c.vkDestroyDevice(self.impl.device, null);
+        c.vkDestroySurfaceKHR(self.impl.instance, self.impl.surface, null);
+        c.vkDestroyInstance(self.impl.instance, null);
     }
 };

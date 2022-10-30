@@ -7,10 +7,10 @@ pub fn main() !void {
     var input = Input{};
     var time = Time.init();
 
-    var window = try Window.create(.{ .input = &input });
+    var window = try Window.create(&input);
     defer window.destroy();
 
-    var renderer = try Renderer.create(.{ .window = &window, .time = &time });
+    var renderer = try Renderer.create(&window, &time);
     defer renderer.destroy();
 
     while (true) {
