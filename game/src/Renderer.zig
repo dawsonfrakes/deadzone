@@ -1,6 +1,7 @@
 const std = @import("std");
 const platform = @import("platform.zig");
 const c = @import("c.zig");
+const math = @import("math.zig");
 const Window = @import("Window.zig");
 const Time = @import("Time.zig");
 
@@ -20,8 +21,7 @@ const Vertex = struct {
 };
 
 const MeshPushConstants = struct {
-    data: @Vector(4, f32),
-    render_matrix: [4]@Vector(4, f32),
+    mvp: math.Matrix(f32, 4, 4),
 };
 
 // TODO: use structs to make this cleaner (i.e. Faces should use names instead of an array of only brain-known values)
@@ -676,7 +676,7 @@ const VulkanRendererImpl = struct {
             },
         });
 
-        result.impl.cube_mesh = try Mesh.create(&result.impl, try comptime parseObj("cube.obj"));
+        result.impl.cube_mesh = try Mesh.create(&result.impl, try comptime parseObj("meshes/cube.obj"));
 
         try result.swapchain_init();
 
@@ -712,29 +712,23 @@ const VulkanRendererImpl = struct {
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.impl.surface_capabilities.currentExtent,
         }));
-        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        const r = std.math.sin(@floatCast(f32, self.time.running)) / 2.0;
         c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-            .render_matrix = [_]@Vector(4, f32){
-                .{ 1.0, 0.0, 0.0, 0.0 },
-                .{ 0.0, 1.0, 0.0, 0.0 },
-                .{ 0.0, 0.0, 1.0, 0.0 },
-                .{ 0.0, 0.0, 0.0, 1.0 },
-            },
-        }));
-        c.vkCmdDraw(buffer, self.impl.triangle_mesh.draw_count, 1, 0, 0);
-        const x = std.math.sin(@floatCast(f32, self.time.running)) / 2.0;
-        const translate = @Vector(3, f32){ x, 0.0, 0.0 };
-        const scale = @Vector(3, f32){ 0.5, 0.5, 1.0 };
-        c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-            .render_matrix = [_]@Vector(4, f32){
-                .{ scale[0], 0.0, 0.0, 0.0 },
-                .{ 0.0, scale[1], 0.0, 0.0 },
-                .{ 0.0, 0.0, scale[2], 0.0 },
-                .{ translate[0], translate[1], translate[2], 1.0 },
-            },
+            // we can comptime a model matrix up to its first non-comptime value usage
+            .mvp = (comptime math.Matrix(f32, 4, 4).I())
+                .rotate(.{ 0.0, 0.0, r })
+                .scale(.{ 0.5, 0.5, 1.0 }),
         }));
         c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.cube_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
         c.vkCmdDraw(buffer, self.impl.cube_mesh.draw_count, 1, 0, 0);
+        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
+            .mvp = comptime math.Matrix(f32, 4, 4).I()
+                .translate(.{ 0.5, 0.0, 0.0 })
+                .rotate(.{ 0.0, 0.0, std.math.pi / 2.0 })
+                .scale(.{ 0.5, 0.5, 1.0 }),
+        }));
+        c.vkCmdDraw(buffer, self.impl.triangle_mesh.draw_count, 1, 0, 0);
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
     }
