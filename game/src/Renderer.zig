@@ -13,6 +13,7 @@ pub usingnamespace Impl;
 
 impl: Impl,
 time: *const Time,
+window: *const Window,
 
 const Vertex = struct {
     position: @Vector(3, f32),
@@ -357,6 +358,7 @@ const VulkanRendererImpl = struct {
 
     pub fn create(window: *const Window, time: *const Time) !Renderer {
         var result: Renderer = undefined;
+        result.window = window;
         result.time = time;
         result.impl.current_frame = 0;
         // createInstance()
@@ -632,7 +634,7 @@ const VulkanRendererImpl = struct {
                 .pRasterizationState = &zi(c.VkPipelineRasterizationStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
                     .polygonMode = polygon_mode,
-                    .cullMode = c.VK_CULL_MODE_BACK_BIT,
+                    .cullMode = c.VK_CULL_MODE_NONE,
                     .frontFace = c.VK_FRONT_FACE_CLOCKWISE,
                     .lineWidth = 1.0,
                 }),
@@ -712,21 +714,26 @@ const VulkanRendererImpl = struct {
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.impl.surface_capabilities.currentExtent,
         }));
-        const r = std.math.sin(@floatCast(f32, self.time.running)) / 2.0;
+        // we can comptime a matrix up to its first non-comptime value usage
+        const view = comptime math.Matrix(f32, 4, 4).I().translate(.{ 0.0, 0.0, 1.0 });
+        const projection = math.Matrix(f32, 4, 4).Perspective(std.math.pi / 3.0, @intToFloat(f32, self.window.width) / @intToFloat(f32, self.window.height), 0.1, 100.0);
+        // NOTE: moves front face to z=0 for testing
+        const model1 = (comptime math.Matrix(f32, 4, 4).I()
+            .translate(.{ 0.0, 0.0, 1.0 }))
+            .rotate(.{ 0.0, 0.0, std.math.sin(@floatCast(f32, self.time.running)) / 2.0 })
+            .scale(.{ 0.5, 0.5, 1.0 });
         c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-            // we can comptime a model matrix up to its first non-comptime value usage
-            .mvp = (comptime math.Matrix(f32, 4, 4).I())
-                .rotate(.{ 0.0, 0.0, r })
-                .scale(.{ 0.5, 0.5, 1.0 }),
+            .mvp = projection.mul(view).mul(model1),
         }));
         c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.cube_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
         c.vkCmdDraw(buffer, self.impl.cube_mesh.draw_count, 1, 0, 0);
         c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        const model2 = comptime math.Matrix(f32, 4, 4).I()
+            .translate(.{ 0.5, 0.0, 0.0 })
+            .rotate(.{ 0.0, 0.0, std.math.pi / 2.0 })
+            .scale(.{ 0.5, 0.5, 1.0 });
         c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-            .mvp = comptime math.Matrix(f32, 4, 4).I()
-                .translate(.{ 0.5, 0.0, 0.0 })
-                .rotate(.{ 0.0, 0.0, std.math.pi / 2.0 })
-                .scale(.{ 0.5, 0.5, 1.0 }),
+            .mvp = projection.mul(comptime view.mul(model2)),
         }));
         c.vkCmdDraw(buffer, self.impl.triangle_mesh.draw_count, 1, 0, 0);
         c.vkCmdEndRenderPass(buffer);

@@ -55,7 +55,11 @@ const XlibWindowImpl = struct {
             var ev: c.XEvent = undefined;
             _ = c.XNextEvent(self.impl.dpy, &ev);
             switch (ev.@"type") {
-                c.Expose => std.debug.print("Window(w={}, h={})\n", .{ ev.xexpose.width, ev.xexpose.height }),
+                c.Expose => {
+                    self.width = @intCast(u16, ev.xexpose.width);
+                    self.height = @intCast(u16, ev.xexpose.height);
+                    std.debug.print("Window(w={}, h={})\n", .{ ev.xexpose.width, ev.xexpose.height });
+                },
                 c.KeyPress, c.KeyRelease => {
                     const sym = c.XLookupKeysym(&ev.xkey, 0);
                     const pressed = ev.@"type" == c.KeyPress;

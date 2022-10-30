@@ -71,6 +71,13 @@ pub fn Matrix(
             return result;
         }
 
+        // TODO: implement this properly.
+        pub fn Perspective(fovy: T, aspect: T, znear: T, zfar: T) Self {
+            _ = .{ fovy, aspect, znear, zfar };
+            var result = I();
+            return result;
+        }
+
         pub fn translate(self: Self, t: @Vector(3, T)) Self {
             var result = I();
             comptime var i = 0;
@@ -80,6 +87,10 @@ pub fn Matrix(
             return result.mul(self);
         }
 
+        pub fn rotate(self: Self, r: @Vector(3, T)) Self {
+            return RotationZ(r[2]).mul(RotationX(r[0]).mul(RotationY(r[1]).mul(self)));
+        }
+
         pub fn scale(self: Self, t: @Vector(3, T)) Self {
             var result = I();
             comptime var i = 0;
@@ -87,10 +98,6 @@ pub fn Matrix(
                 result.data[i][i] = t[i];
             }
             return result.mul(self);
-        }
-
-        pub fn rotate(self: Self, r: @Vector(3, T)) Self {
-            return RotationZ(r[2]).mul(RotationX(r[0]).mul(RotationY(r[1]).mul(self)));
         }
     };
 }
