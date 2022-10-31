@@ -8,7 +8,7 @@ pub fn Matrix(
     return struct {
         const Self = @This();
 
-        data: [h]@Vector(w, T) = I().data,
+        data: [w]@Vector(h, T) = I().data,
 
         pub fn O() Self {
             return std.mem.zeroes(Self);
@@ -30,7 +30,7 @@ pub fn Matrix(
                 inline while (j < w) : (j += 1) {
                     comptime var k = 0;
                     inline while (k < h) : (k += 1) {
-                        result.data[i][j] += self.data[i][k] * other.data[k][j];
+                        result.data[j][i] += self.data[k][i] * other.data[j][k];
                     }
                 }
             }
@@ -71,10 +71,20 @@ pub fn Matrix(
             return result;
         }
 
-        // TODO: implement this properly.
+        // reference: https://vincent-p.github.io/posts/vulkan_perspective_matrix/
         pub fn Perspective(fovy: T, aspect: T, znear: T, zfar: T) Self {
-            _ = .{ fovy, aspect, znear, zfar };
-            var result = I();
+            const focal_length = @as(T, 1) / @tan(fovy / @as(T, 2));
+
+            var result = O();
+            // map x coordinates to clip-space
+            result.data[0][0] = focal_length / aspect;
+            // map y coordinates to clip-space
+            result.data[1][1] = -focal_length;
+            // map z coordinates to clip-space (near:1-far:0)
+            result.data[2][2] = znear / (zfar - znear);
+            result.data[3][2] = (znear * zfar) / (zfar - znear);
+            // copy -z into w for perspective divide
+            result.data[2][3] = -@as(T, 1);
             return result;
         }
 
