@@ -43,8 +43,8 @@ pub fn Matrix(
             const c = @cos(angle);
             const s = @sin(angle);
             result.data[1][1] = c;
-            result.data[2][1] = s;
-            result.data[1][2] = -s;
+            result.data[2][1] = -s;
+            result.data[1][2] = s;
             result.data[2][2] = c;
             return result;
         }
@@ -65,8 +65,8 @@ pub fn Matrix(
             const c = @cos(angle);
             const s = @sin(angle);
             result.data[0][0] = c;
-            result.data[1][0] = s;
-            result.data[0][1] = -s;
+            result.data[1][0] = -s;
+            result.data[0][1] = s;
             result.data[1][1] = c;
             return result;
         }

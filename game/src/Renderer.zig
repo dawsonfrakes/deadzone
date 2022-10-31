@@ -54,6 +54,11 @@ const MeshPushConstants = struct {
     mvp: math.Matrix(f32, 4, 4),
 };
 
+const RenderObject = struct {
+    mesh: Mesh,
+    transform: math.Matrix(f32, 4, 4),
+};
+
 // TODO: use structs to make this cleaner (i.e. Faces should use names instead of an array of only brain-known values)
 pub fn parseObj(comptime mesh: Mesh) ![]Vertex {
     @setEvalBranchQuota(100000);
@@ -158,8 +163,8 @@ const VulkanRendererImpl = struct {
     // temporary
     mesh_graphics_pipeline_layout: c.VkPipelineLayout,
     mesh_graphics_pipeline: c.VkPipeline,
-    triangle_mesh: VulkanMesh,
-    cube_mesh: VulkanMesh,
+    render_objects: std.ArrayList(RenderObject),
+    mesh_to_gpudata_map: std.EnumArray(Mesh, VulkanMesh),
 
     fn vkCheck(result: c.VkResult) !void {
         if (result != c.VK_SUCCESS) {
@@ -454,11 +459,16 @@ const VulkanRendererImpl = struct {
         return self.impl.graphics_queue_family_index == self.impl.present_queue_family_index;
     }
 
+    pub fn appendStaticMesh(self: *Renderer, static_mesh: RenderObject) void {
+        self.impl.render_objects.append(static_mesh) catch @panic("ran out of memory :'(");
+    }
+
     pub fn create(window: *const Window, time: *const Time) !Renderer {
         var result: Renderer = undefined;
         result.window = window;
         result.time = time;
         result.impl.current_frame = 0;
+        result.impl.render_objects = std.ArrayList(RenderObject).init(std.heap.c_allocator);
         // createInstance()
         {
             const instance_layers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
@@ -791,25 +801,10 @@ const VulkanRendererImpl = struct {
             }), null, &result.impl.mesh_graphics_pipeline));
         }
 
-        result.impl.triangle_mesh = try VulkanMesh.create(&result.impl, &[_]Vertex{
-            .{
-                .position = .{ 1.0, 1.0, 0.0 },
-                .normal = .{ 0.0, 0.0, 0.0 },
-                .color = .{ 1.0, 0.0, 0.0 },
-            },
-            .{
-                .position = .{ -1.0, 1.0, 0.0 },
-                .normal = .{ 0.0, 0.0, 0.0 },
-                .color = .{ 0.0, 1.0, 0.0 },
-            },
-            .{
-                .position = .{ 0.0, -1.0, 0.0 },
-                .normal = .{ 0.0, 0.0, 0.0 },
-                .color = .{ 0.0, 0.0, 1.0 },
-            },
-        });
-
-        result.impl.cube_mesh = try VulkanMesh.create(&result.impl, try comptime parseObj(.cube));
+        result.impl.mesh_to_gpudata_map = std.EnumArray(Mesh, VulkanMesh).initUndefined();
+        inline for (@typeInfo(Mesh).Enum.fields) |field| {
+            result.impl.mesh_to_gpudata_map.set(@field(Mesh, field.name), try VulkanMesh.create(&result.impl, try comptime parseObj(@field(Mesh, field.name))));
+        }
 
         try result.swapchain_init();
 
@@ -851,20 +846,14 @@ const VulkanRendererImpl = struct {
         // we can comptime a matrix up to its first non-comptime value usage
         const view = comptime math.Matrix(f32, 4, 4).I().translate(.{ 0.0, 0.0, -5.0 });
         const projection = math.Matrix(f32, 4, 4).Perspective(std.math.pi / 2.0, @intToFloat(f32, self.window.width) / @intToFloat(f32, self.window.height), 0.1, 100.0);
-        const model1 = (comptime math.Matrix(f32, 4, 4).I())
-            .rotate(.{ 0.0, std.math.sin(@floatCast(f32, self.time.running)), 0.0 });
-        c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-            .mvp = projection.mul(view).mul(model1),
-        }));
-        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.cube_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
-        c.vkCmdDraw(buffer, self.impl.cube_mesh.draw_count, 1, 0, 0);
-        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
-        c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-            .mvp = projection.mul(comptime view.mul(math.Matrix(f32, 4, 4).I()
-                .translate(.{ 0.0, 0.0, 1.1 })
-                .rotate(.{ 0.0, 0.0, std.math.pi / 2.0 }))),
-        }));
-        c.vkCmdDraw(buffer, self.impl.triangle_mesh.draw_count, 1, 0, 0);
+        for (self.impl.render_objects.items) |object| {
+            c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
+                .mvp = projection.mul(view).mul(object.transform),
+            }));
+            const gpumesh = self.impl.mesh_to_gpudata_map.get(object.mesh);
+            c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpumesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+            c.vkCmdDraw(buffer, gpumesh.draw_count, 1, 0, 0);
+        }
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
     }
@@ -908,8 +897,10 @@ const VulkanRendererImpl = struct {
 
     pub fn destroy(self: Renderer) void {
         swapchain_deinit(self);
-        self.impl.cube_mesh.destroy();
-        self.impl.triangle_mesh.destroy();
+        self.impl.render_objects.deinit();
+        inline for (@typeInfo(Mesh).Enum.fields) |field| {
+            self.impl.mesh_to_gpudata_map.get(@field(Mesh, field.name)).destroy();
+        }
         c.vkDestroyPipeline(self.impl.device, self.impl.mesh_graphics_pipeline, null);
         c.vkDestroyPipelineLayout(self.impl.device, self.impl.mesh_graphics_pipeline_layout, null);
         c.vkDestroyRenderPass(self.impl.device, self.impl.render_pass, null);
