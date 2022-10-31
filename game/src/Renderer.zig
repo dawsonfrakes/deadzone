@@ -26,8 +26,8 @@ const Mesh = @Type(.{ .Enum = .{
         .bits = @ceil(@log2(@intToFloat(comptime_float, options.files.len))),
     } }),
     .fields = blk: {
-        comptime var fields: [options.files.len]std.builtin.Type.EnumField = undefined;
-        inline for (options.files) |file, i| {
+        var fields: [options.files.len]std.builtin.Type.EnumField = undefined;
+        for (options.files) |file, i| {
             fields[i] = .{ .name = file, .value = i };
         }
         break :blk &fields;
@@ -35,6 +35,14 @@ const Mesh = @Type(.{ .Enum = .{
     .decls = &.{},
     .is_exhaustive = true,
 } });
+
+const mesh_to_file_map = blk: {
+    var map = std.EnumMap(Mesh, []const u8){};
+    for (@typeInfo(Mesh).Enum.fields) |field| {
+        map.put(@field(Mesh, field.name), options.files_folder ++ "/" ++ field.name ++ ".obj");
+    }
+    break :blk map;
+};
 
 const Vertex = struct {
     position: @Vector(3, f32),
@@ -47,9 +55,9 @@ const MeshPushConstants = struct {
 };
 
 // TODO: use structs to make this cleaner (i.e. Faces should use names instead of an array of only brain-known values)
-pub fn parseObj(comptime path: []const u8) ![]Vertex {
+pub fn parseObj(comptime mesh: Mesh) ![]Vertex {
     @setEvalBranchQuota(100000);
-    const file_data = @embedFile(path);
+    const file_data = @embedFile(mesh_to_file_map.get(mesh).?);
     var stream = std.io.fixedBufferStream(file_data);
     const reader = stream.reader();
 
@@ -116,13 +124,6 @@ const VulkanRendererImpl = struct {
     const zi = std.mem.zeroInit;
     const max_frames_rendering_at_once = 2;
     const max_swapchain_images = 10;
-    const mesh_objs = blk: {
-        comptime var map = std.EnumMap(Mesh, []const u8){};
-        inline for (@typeInfo(Mesh).Enum.fields) |field| {
-            map.put(@field(Mesh, field.name), options.files_folder ++ "/" ++ field.name ++ ".obj");
-        }
-        break :blk map;
-    };
 
     instance: c.VkInstance,
     physical_device: c.VkPhysicalDevice,
@@ -191,25 +192,23 @@ const VulkanRendererImpl = struct {
             }
 
             fn init() Self {
-                comptime {
-                    var result: Self = undefined;
-                    for (result.bindings) |*binding, i| {
-                        binding.* = .{
-                            .binding = i,
-                            .stride = @sizeOf(T),
-                            .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX,
-                        };
-                    }
-                    for (result.attributes) |*attribute, i| {
-                        attribute.* = .{
-                            .binding = 0,
-                            .location = @intCast(u32, i),
-                            .format = getFormat(i),
-                            .offset = @offsetOf(T, Info.fields[i].name),
-                        };
-                    }
-                    return result;
+                var result: Self = undefined;
+                inline for (result.bindings) |*binding, i| {
+                    binding.* = .{
+                        .binding = i,
+                        .stride = @sizeOf(T),
+                        .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX,
+                    };
                 }
+                inline for (result.attributes) |*attribute, i| {
+                    attribute.* = .{
+                        .binding = 0,
+                        .location = @intCast(u32, i),
+                        .format = getFormat(i),
+                        .offset = @offsetOf(T, Info.fields[i].name),
+                    };
+                }
+                return result;
             }
         };
     }
@@ -810,7 +809,7 @@ const VulkanRendererImpl = struct {
             },
         });
 
-        result.impl.cube_mesh = try VulkanMesh.create(&result.impl, try comptime parseObj(mesh_objs.getAssertContains(.cube)));
+        result.impl.cube_mesh = try VulkanMesh.create(&result.impl, try comptime parseObj(.cube));
 
         try result.swapchain_init();
 
