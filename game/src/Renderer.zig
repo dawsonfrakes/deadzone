@@ -122,6 +122,7 @@ const VulkanRendererImpl = struct {
     swapchain_images: [max_swapchain_images]c.VkImage,
     swapchain_image_views: [max_swapchain_images]c.VkImageView,
     framebuffers: [max_swapchain_images]c.VkFramebuffer,
+    depth_buffer: Image,
 
     current_frame: u32,
 
@@ -185,22 +186,22 @@ const VulkanRendererImpl = struct {
         };
     }
 
+    fn find_mem_type(impl: *const VulkanRendererImpl, type_filter: u32, properties: c.VkMemoryPropertyFlags) ?u32 {
+        var i: u5 = 0;
+        while (i < impl.physical_device_memory_properties.memoryTypeCount) : (i += 1) {
+            if ((type_filter & (@as(u32, 1) << i)) != 0 and (impl.physical_device_memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+                return i;
+            }
+        }
+        return null;
+    }
+
     const Buffer = struct {
         const Self = @This();
 
         impl: *const VulkanRendererImpl,
         buffer: c.VkBuffer,
         memory: c.VkDeviceMemory,
-
-        fn find_mem_type(self: Self, type_filter: u32, properties: c.VkMemoryPropertyFlags) ?u32 {
-            var i: u5 = 0;
-            while (i < self.impl.physical_device_memory_properties.memoryTypeCount) : (i += 1) {
-                if ((type_filter & (@as(u32, 1) << i)) != 0 and (self.impl.physical_device_memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
-                    return i;
-                }
-            }
-            return null;
-        }
 
         fn create(impl: *const VulkanRendererImpl, size: c.VkDeviceSize, usage: c.VkBufferUsageFlags, properties: c.VkMemoryPropertyFlags) !Self {
             var result: Self = undefined;
@@ -217,7 +218,7 @@ const VulkanRendererImpl = struct {
             try vkCheck(c.vkAllocateMemory(impl.device, &zi(c.VkMemoryAllocateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                 .allocationSize = mem_req.size,
-                .memoryTypeIndex = result.find_mem_type(mem_req.memoryTypeBits, properties) orelse return error.NoMemoryTypeFound,
+                .memoryTypeIndex = impl.find_mem_type(mem_req.memoryTypeBits, properties) orelse return error.NoMemoryTypeFound,
             }), null, &result.memory));
             errdefer c.vkFreeMemory(impl.device, result.memory, null);
             try vkCheck(c.vkBindBufferMemory(impl.device, result.buffer, result.memory, 0));
@@ -227,6 +228,64 @@ const VulkanRendererImpl = struct {
         fn destroy(self: Self) void {
             c.vkFreeMemory(self.impl.device, self.memory, null);
             c.vkDestroyBuffer(self.impl.device, self.buffer, null);
+        }
+    };
+
+    const Image = struct {
+        const Self = @This();
+
+        impl: *const VulkanRendererImpl,
+        image: c.VkImage,
+        view: c.VkImageView,
+        format: c.VkFormat,
+        memory: c.VkDeviceMemory,
+
+        fn create(impl: *const VulkanRendererImpl, format: c.VkFormat, usage: c.VkImageUsageFlags, extent: c.VkExtent3D, aspect_flags: c.VkImageAspectFlags, properties: c.VkMemoryPropertyFlags) !Self {
+            var result: Self = undefined;
+            result.impl = impl;
+            result.format = format;
+            try vkCheck(c.vkCreateImage(impl.device, &zi(c.VkImageCreateInfo, .{
+                .sType = c.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+                .imageType = c.VK_IMAGE_TYPE_2D,
+                .format = result.format,
+                .extent = extent,
+                .mipLevels = 1,
+                .arrayLayers = 1,
+                .samples = c.VK_SAMPLE_COUNT_1_BIT,
+                .tiling = c.VK_IMAGE_TILING_OPTIMAL,
+                .usage = usage,
+            }), null, &result.image));
+            errdefer c.vkDestroyImage(impl.device, result.image, null);
+            var mem_req: c.VkMemoryRequirements = undefined;
+            c.vkGetImageMemoryRequirements(impl.device, result.image, &mem_req);
+            try vkCheck(c.vkAllocateMemory(impl.device, &zi(c.VkMemoryAllocateInfo, .{
+                .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .allocationSize = mem_req.size,
+                .memoryTypeIndex = impl.find_mem_type(mem_req.memoryTypeBits, properties) orelse return error.NoMemoryTypeFound,
+            }), null, &result.memory));
+            errdefer c.vkFreeMemory(impl.device, result.memory, null);
+            try vkCheck(c.vkBindImageMemory(impl.device, result.image, result.memory, 0));
+            try vkCheck(c.vkCreateImageView(impl.device, &zi(c.VkImageViewCreateInfo, .{
+                .sType = c.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                .viewType = c.VK_IMAGE_VIEW_TYPE_2D,
+                .image = result.image,
+                .format = result.format,
+                .subresourceRange = .{
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                    .aspectMask = aspect_flags,
+                },
+            }), null, &result.view));
+            errdefer c.vkDestroyImageView(impl.device, result.view, null);
+            return result;
+        }
+
+        fn destroy(self: Self) void {
+            c.vkDestroyImageView(self.impl.device, self.view, null);
+            c.vkFreeMemory(self.impl.device, self.memory, null);
+            c.vkDestroyImage(self.impl.device, self.image, null);
         }
     };
 
@@ -320,6 +379,14 @@ const VulkanRendererImpl = struct {
                 }), null, &self.impl.swapchain_image_views[i]));
             }
         }
+        // createDepthBuffer()
+        {
+            self.impl.depth_buffer = try Image.create(&self.impl, c.VK_FORMAT_D32_SFLOAT, c.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, .{
+                .width = self.impl.surface_capabilities.currentExtent.width,
+                .height = self.impl.surface_capabilities.currentExtent.height,
+                .depth = 1,
+            }, c.VK_IMAGE_ASPECT_DEPTH_BIT, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        }
         // createFramebuffers()
         {
             var i: usize = 0;
@@ -327,8 +394,11 @@ const VulkanRendererImpl = struct {
                 try vkCheck(c.vkCreateFramebuffer(self.impl.device, &zi(c.VkFramebufferCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
                     .renderPass = self.impl.render_pass,
-                    .attachmentCount = 1,
-                    .pAttachments = &self.impl.swapchain_image_views[i],
+                    .attachmentCount = 2,
+                    .pAttachments = &[_]c.VkImageView{
+                        self.impl.swapchain_image_views[i],
+                        self.impl.depth_buffer.view,
+                    },
                     .width = self.impl.surface_capabilities.currentExtent.width,
                     .height = self.impl.surface_capabilities.currentExtent.height,
                     .layers = 1,
@@ -344,6 +414,7 @@ const VulkanRendererImpl = struct {
             c.vkDestroyFramebuffer(self.impl.device, self.impl.framebuffers[i], null);
             c.vkDestroyImageView(self.impl.device, self.impl.swapchain_image_views[i], null);
         }
+        self.impl.depth_buffer.destroy();
         c.vkDestroySwapchainKHR(self.impl.device, self.impl.swapchain, null);
     }
 
@@ -528,17 +599,29 @@ const VulkanRendererImpl = struct {
         {
             try vkCheck(c.vkCreateRenderPass(result.impl.device, &zi(c.VkRenderPassCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-                .attachmentCount = 1,
-                .pAttachments = &zi(c.VkAttachmentDescription, .{
-                    .format = result.impl.surface_format.format,
-                    .samples = c.VK_SAMPLE_COUNT_1_BIT,
-                    .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
-                    .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
-                    .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-                    .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                    .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
-                    .finalLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                }),
+                .attachmentCount = 2,
+                .pAttachments = &[_]c.VkAttachmentDescription{
+                    zi(c.VkAttachmentDescription, .{
+                        .format = result.impl.surface_format.format,
+                        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+                        .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
+                        .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                        .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                        .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
+                        .finalLayout = c.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                    }),
+                    zi(c.VkAttachmentDescription, .{
+                        .format = c.VK_FORMAT_D32_SFLOAT,
+                        .samples = c.VK_SAMPLE_COUNT_1_BIT,
+                        .loadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        .storeOp = c.VK_ATTACHMENT_STORE_OP_STORE,
+                        .stencilLoadOp = c.VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        .stencilStoreOp = c.VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                        .initialLayout = c.VK_IMAGE_LAYOUT_UNDEFINED,
+                        .finalLayout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    }),
+                },
                 .subpassCount = 1,
                 .pSubpasses = &zi(c.VkSubpassDescription, .{
                     .pipelineBindPoint = c.VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -547,16 +630,30 @@ const VulkanRendererImpl = struct {
                         .attachment = 0,
                         .layout = c.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     }),
+                    .pDepthStencilAttachment = &zi(c.VkAttachmentReference, .{
+                        .attachment = 1,
+                        .layout = c.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    }),
                 }),
-                .dependencyCount = 1,
-                .pDependencies = &zi(c.VkSubpassDependency, .{
-                    .srcSubpass = c.VK_SUBPASS_EXTERNAL,
-                    .dstSubpass = 0,
-                    .srcStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    .srcAccessMask = 0,
-                    .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                }),
+                .dependencyCount = 2,
+                .pDependencies = &[_]c.VkSubpassDependency{
+                    zi(c.VkSubpassDependency, .{
+                        .srcSubpass = c.VK_SUBPASS_EXTERNAL,
+                        .dstSubpass = 0,
+                        .srcStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        .srcAccessMask = 0,
+                        .dstStageMask = c.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        .dstAccessMask = c.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    }),
+                    zi(c.VkSubpassDependency, .{
+                        .srcSubpass = c.VK_SUBPASS_EXTERNAL,
+                        .dstSubpass = 0,
+                        .srcStageMask = c.VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | c.VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                        .srcAccessMask = 0,
+                        .dstStageMask = c.VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | c.VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                        .dstAccessMask = c.VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                    }),
+                },
             }), null, &result.impl.render_pass));
         }
         var vertex_shader_module: c.VkShaderModule = undefined;
@@ -634,7 +731,7 @@ const VulkanRendererImpl = struct {
                 .pRasterizationState = &zi(c.VkPipelineRasterizationStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
                     .polygonMode = polygon_mode,
-                    .cullMode = c.VK_CULL_MODE_NONE,
+                    .cullMode = c.VK_CULL_MODE_BACK_BIT,
                     .frontFace = c.VK_FRONT_FACE_COUNTER_CLOCKWISE,
                     .lineWidth = 1.0,
                 }),
@@ -653,6 +750,13 @@ const VulkanRendererImpl = struct {
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                     .dynamicStateCount = 2,
                     .pDynamicStates = &[_]c.VkDynamicState{ c.VK_DYNAMIC_STATE_VIEWPORT, c.VK_DYNAMIC_STATE_SCISSOR },
+                }),
+                .pDepthStencilState = &zi(c.VkPipelineDepthStencilStateCreateInfo, .{
+                    .sType = c.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+                    .depthTestEnable = c.VK_TRUE,
+                    .depthWriteEnable = c.VK_TRUE,
+                    .depthCompareOp = c.VK_COMPARE_OP_LESS_OR_EQUAL,
+                    .depthBoundsTestEnable = c.VK_FALSE,
                 }),
                 .layout = layout,
                 .renderPass = result.impl.render_pass,
@@ -698,8 +802,11 @@ const VulkanRendererImpl = struct {
                 .offset = .{ .x = 0, .y = 0 },
                 .extent = self.impl.surface_capabilities.currentExtent,
             },
-            .clearValueCount = 1,
-            .pClearValues = &c.VkClearValue{ .color = .{ .float32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 } } },
+            .clearValueCount = 2,
+            .pClearValues = &[_]c.VkClearValue{
+                .{ .color = .{ .float32 = [_]f32{ 0.0, 0.0, 0.0, 1.0 } } },
+                .{ .depthStencil = .{ .depth = 1.0, .stencil = 0 } },
+            },
         }), c.VK_SUBPASS_CONTENTS_INLINE);
         c.vkCmdBindPipeline(buffer, c.VK_PIPELINE_BIND_POINT_GRAPHICS, self.impl.mesh_graphics_pipeline);
         c.vkCmdSetViewport(buffer, 0, 1, &zi(c.VkViewport, .{
@@ -727,6 +834,7 @@ const VulkanRendererImpl = struct {
         c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.impl.triangle_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
         c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
             .mvp = projection.mul(comptime view.mul(math.Matrix(f32, 4, 4).I()
+                .translate(.{ 0.0, 0.0, 1.1 })
                 .rotate(.{ 0.0, 0.0, std.math.pi / 2.0 }))),
         }));
         c.vkCmdDraw(buffer, self.impl.triangle_mesh.draw_count, 1, 0, 0);
