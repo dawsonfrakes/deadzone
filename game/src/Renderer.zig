@@ -1,4 +1,5 @@
 const std = @import("std");
+const options = @import("options");
 const platform = @import("platform.zig");
 const c = @import("c.zig");
 const math = @import("math.zig");
@@ -14,6 +15,26 @@ pub usingnamespace Impl;
 impl: Impl,
 time: *const Time,
 window: *const Window,
+
+// Comptime Mesh constant loader (currently receives values from .options in build.zig)
+// Reads files from src/meshes/* and generates enum values based on them
+// Example: Reference ./src/meshes/cube.obj with Mesh.cube
+const Mesh = @Type(.{ .Enum = .{
+    .layout = .Auto,
+    .tag_type = @Type(.{ .Int = .{
+        .signedness = .unsigned,
+        .bits = @ceil(@log2(@intToFloat(comptime_float, options.files.len))),
+    } }),
+    .fields = blk: {
+        comptime var fields: [options.files.len]std.builtin.Type.EnumField = undefined;
+        inline for (options.files) |file, i| {
+            fields[i] = .{ .name = file, .value = i };
+        }
+        break :blk &fields;
+    },
+    .decls = &.{},
+    .is_exhaustive = true,
+} });
 
 const Vertex = struct {
     position: @Vector(3, f32),
@@ -95,6 +116,13 @@ const VulkanRendererImpl = struct {
     const zi = std.mem.zeroInit;
     const max_frames_rendering_at_once = 2;
     const max_swapchain_images = 10;
+    const mesh_objs = blk: {
+        comptime var map = std.EnumMap(Mesh, []const u8){};
+        inline for (@typeInfo(Mesh).Enum.fields) |field| {
+            map.put(@field(Mesh, field.name), options.files_folder ++ "/" ++ field.name ++ ".obj");
+        }
+        break :blk map;
+    };
 
     instance: c.VkInstance,
     physical_device: c.VkPhysicalDevice,
@@ -129,8 +157,8 @@ const VulkanRendererImpl = struct {
     // temporary
     mesh_graphics_pipeline_layout: c.VkPipelineLayout,
     mesh_graphics_pipeline: c.VkPipeline,
-    triangle_mesh: Mesh,
-    cube_mesh: Mesh,
+    triangle_mesh: VulkanMesh,
+    cube_mesh: VulkanMesh,
 
     fn vkCheck(result: c.VkResult) !void {
         if (result != c.VK_SUCCESS) {
@@ -289,7 +317,7 @@ const VulkanRendererImpl = struct {
         }
     };
 
-    const Mesh = struct {
+    const VulkanMesh = struct {
         const Self = @This();
 
         buffer: Buffer,
@@ -764,7 +792,7 @@ const VulkanRendererImpl = struct {
             }), null, &result.impl.mesh_graphics_pipeline));
         }
 
-        result.impl.triangle_mesh = try Mesh.create(&result.impl, &[_]Vertex{
+        result.impl.triangle_mesh = try VulkanMesh.create(&result.impl, &[_]Vertex{
             .{
                 .position = .{ 1.0, 1.0, 0.0 },
                 .normal = .{ 0.0, 0.0, 0.0 },
@@ -782,7 +810,7 @@ const VulkanRendererImpl = struct {
             },
         });
 
-        result.impl.cube_mesh = try Mesh.create(&result.impl, try comptime parseObj("meshes/cube.obj"));
+        result.impl.cube_mesh = try VulkanMesh.create(&result.impl, try comptime parseObj(mesh_objs.getAssertContains(.cube)));
 
         try result.swapchain_init();
 
