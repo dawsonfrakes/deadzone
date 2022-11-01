@@ -9,15 +9,17 @@ const math = @import("math.zig");
 fn gameInit(renderer: *Renderer) void {
     renderer.appendStaticMesh(.{
         .mesh = .cube,
-        .transform = math.Matrix(f32, 4, 4).I()
-            .rotate(.{ std.math.pi / 4.0, 0.0, 0.0 }),
+        .transform = .{
+            .rotation = .{ std.math.pi / 4.0, 0.0, 0.0 },
+        },
     });
 
     renderer.appendStaticMesh(.{
         .mesh = .triangle,
-        .transform = math.Matrix(f32, 4, 4).I()
-            .translate(.{ 0.0, 0.0, 1.1 })
-            .rotate(.{ 0.0, 0.0, std.math.pi / 2.0 }),
+        .transform = .{
+            .translation = .{ 0.0, 0.0, 1.1 },
+            .rotation = .{ 0.0, 0.0, std.math.pi / 2.0 },
+        },
     });
 }
 

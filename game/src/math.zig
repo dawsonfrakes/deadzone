@@ -1,5 +1,18 @@
 const std = @import("std");
 
+pub const Transform = struct {
+    translation: @Vector(3, f32) = @splat(3, @as(f32, 0.0)),
+    rotation: @Vector(3, f32) = @splat(3, @as(f32, 0.0)),
+    scale: @Vector(3, f32) = @splat(3, @as(f32, 1.0)),
+
+    pub fn matrix(transform: Transform) Matrix(f32, 4, 4) {
+        return (comptime Matrix(f32, 4, 4).I())
+            .translate(transform.translation)
+            .rotate(transform.rotation)
+            .scale(transform.scale);
+    }
+};
+
 pub fn Matrix(
     comptime T: type,
     comptime w: comptime_int,

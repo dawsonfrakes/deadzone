@@ -25,7 +25,7 @@ const Mesh = @Type(.{ .Enum = .{
     .layout = .Auto,
     .tag_type = @Type(.{ .Int = .{
         .signedness = .unsigned,
-        .bits = @ceil(@log2(@intToFloat(comptime_float, options.files.len))),
+        .bits = @ceil(@log2(@as(comptime_float, options.files.len))),
     } }),
     .fields = blk: {
         var fields: [options.files.len]std.builtin.Type.EnumField = undefined;
@@ -58,7 +58,7 @@ const MeshPushConstants = struct {
 
 const RenderObject = struct {
     mesh: Mesh,
-    transform: math.Matrix(f32, 4, 4),
+    transform: math.Transform,
 };
 
 // TODO: use structs to make this cleaner (i.e. Faces should use names instead of an array of only brain-known values)
@@ -71,14 +71,16 @@ fn parseObj(comptime mesh: Mesh) ![]Vertex {
     const max_line_len = @sizeOf(@TypeOf(file_data.*)) - 1;
     var buf: [max_line_len]u8 = undefined;
 
-    var vertices: [max_line_len]@Vector(3, f32) = undefined;
-    var num_vertices: comptime_int = 0;
-    var normals: [max_line_len]@Vector(3, f32) = undefined;
-    var num_normals: comptime_int = 0;
+    const num_lines = std.mem.count(u8, file_data, "\n");
+
+    var vertices: [num_lines]@Vector(3, f32) = undefined;
+    var num_vertices = 0;
+    var normals: [num_lines]@Vector(3, f32) = undefined;
+    var num_normals = 0;
 
     // [0] = vertex{x, y, z}, [1] = texcoord{x, y, z}, [2] = normal{x, y, z}
-    var faces: [max_line_len][3]@Vector(3, u16) = undefined;
-    var num_faces: comptime_int = 0;
+    var faces: [num_lines][3]@Vector(3, u16) = undefined;
+    var num_faces = 0;
 
     while (try reader.readUntilDelimiterOrEof(&buf, '\n')) |line| {
         var tokens = std.mem.split(u8, line, " ");
@@ -108,7 +110,7 @@ fn parseObj(comptime mesh: Mesh) ![]Vertex {
                 .{ try std.fmt.parseInt(u16, index1_tokens.next().?, 10) - 1, try std.fmt.parseInt(u16, index2_tokens.next().?, 10) - 1, try std.fmt.parseInt(u16, index3_tokens.next().?, 10) - 1 },
             };
             num_faces += 1;
-        } else {}
+        }
     }
 
     var result: [num_faces * 3]Vertex = undefined;
@@ -846,7 +848,7 @@ const VulkanRendererImpl = struct {
         const vp = self.projection.mul(self.view);
         for (self.impl.render_objects.items) |object| {
             c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-                .mvp = vp.mul(object.transform),
+                .mvp = vp.mul(object.transform.matrix()),
             }));
             const gpumesh = self.impl.mesh_to_gpudata_map.get(object.mesh);
             c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpumesh.buffer.buffer, &[_]c.VkDeviceSize{0});
