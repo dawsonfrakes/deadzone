@@ -6,6 +6,15 @@ const Time = @import("Time.zig");
 // TODO: move to game specific code rather than EngineMain()
 const std = @import("std");
 const math = @import("math.zig");
+
+const dyn_start = @Vector(3, f32){ 5.0, -2.0, -5.0 };
+var dynamic_object: Renderer.RenderObject = .{
+    .mesh = .cube,
+    .transform = .{
+        .translation = dyn_start,
+    },
+};
+
 fn gameInit(renderer: *Renderer) void {
     renderer.appendStaticMesh(.{
         .mesh = .cube,
@@ -21,6 +30,15 @@ fn gameInit(renderer: *Renderer) void {
             .rotation = .{ 0.0, 0.0, std.math.pi / 2.0 },
         },
     });
+
+    renderer.appendStaticMesh(.{
+        .mesh = .cube,
+        .transform = .{
+            .translation = dyn_start,
+        },
+    });
+
+    renderer.appendDynamicMesh(&dynamic_object);
 }
 
 fn gameUpdate(renderer: *Renderer, input: Input, time: Time) ?void {
@@ -53,6 +71,10 @@ fn gameUpdate(renderer: *Renderer, input: Input, time: Time) ?void {
     const speed = 5.0;
     renderer.view = renderer.view
         .translate(normalized * @splat(3, @floatCast(f32, time.delta * speed)));
+
+    dynamic_object.transform.translation[0] = dyn_start[0] + 3.0 * @cos(@floatCast(f32, time.running));
+    dynamic_object.transform.translation[2] = dyn_start[2] + 3.0 * @sin(@floatCast(f32, time.running));
+    dynamic_object.transform.rotation[1] = @floatCast(f32, time.running);
 }
 
 pub fn main() !void {

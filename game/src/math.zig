@@ -7,9 +7,9 @@ pub const Transform = struct {
 
     pub fn matrix(transform: Transform) Matrix(f32, 4, 4) {
         return (comptime Matrix(f32, 4, 4).I())
-            .translate(transform.translation)
+            .scale(transform.scale)
             .rotate(transform.rotation)
-            .scale(transform.scale);
+            .translate(transform.translation);
     }
 };
 

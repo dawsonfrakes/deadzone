@@ -56,7 +56,7 @@ const MeshPushConstants = struct {
     mvp: math.Matrix(f32, 4, 4),
 };
 
-const RenderObject = struct {
+pub const RenderObject = struct {
     mesh: Mesh,
     transform: math.Transform,
 };
@@ -168,6 +168,7 @@ const VulkanRendererImpl = struct {
     mesh_graphics_pipeline_layout: c.VkPipelineLayout,
     mesh_graphics_pipeline: c.VkPipeline,
     render_objects: std.ArrayList(RenderObject),
+    render_objects_dyn: std.ArrayList(*RenderObject),
     mesh_to_gpudata_map: std.EnumArray(Mesh, VulkanMesh),
 
     fn vkCheck(result: c.VkResult) !void {
@@ -472,6 +473,10 @@ const VulkanRendererImpl = struct {
         self.impl.render_objects.append(static_mesh) catch @panic("ran out of memory :'(");
     }
 
+    pub fn appendDynamicMesh(self: *Renderer, dynamic_mesh: *RenderObject) void {
+        self.impl.render_objects_dyn.append(dynamic_mesh) catch @panic("ran out of memory :'(");
+    }
+
     pub fn create(window: *const Window, time: *const Time) !Renderer {
         var result = Renderer{
             .window = window,
@@ -479,6 +484,7 @@ const VulkanRendererImpl = struct {
         };
         result.impl.current_frame = 0;
         result.impl.render_objects = std.ArrayList(RenderObject).init(std.heap.c_allocator);
+        result.impl.render_objects_dyn = std.ArrayList(*RenderObject).init(std.heap.c_allocator);
         // createInstance()
         {
             const instance_layers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
@@ -854,6 +860,14 @@ const VulkanRendererImpl = struct {
             c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpumesh.buffer.buffer, &[_]c.VkDeviceSize{0});
             c.vkCmdDraw(buffer, gpumesh.draw_count, 1, 0, 0);
         }
+        for (self.impl.render_objects_dyn.items) |object_ptr| {
+            c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
+                .mvp = vp.mul(object_ptr.*.transform.matrix()),
+            }));
+            const gpumesh = self.impl.mesh_to_gpudata_map.get(object_ptr.*.mesh);
+            c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpumesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+            c.vkCmdDraw(buffer, gpumesh.draw_count, 1, 0, 0);
+        }
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
     }
@@ -897,6 +911,7 @@ const VulkanRendererImpl = struct {
 
     pub fn destroy(self: Renderer) void {
         swapchain_deinit(self);
+        self.impl.render_objects_dyn.deinit();
         self.impl.render_objects.deinit();
         inline for (@typeInfo(Mesh).Enum.fields) |field| {
             self.impl.mesh_to_gpudata_map.get(@field(Mesh, field.name)).destroy();
