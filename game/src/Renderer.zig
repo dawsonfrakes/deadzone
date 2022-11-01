@@ -37,10 +37,10 @@ const Mesh = @Type(.{ .Enum = .{
     .is_exhaustive = true,
 } });
 
-const mesh_to_file_map = blk: {
-    var map = std.EnumMap(Mesh, []const u8){};
+const MeshPaths: std.EnumArray(Mesh, []const u8) = blk: {
+    var map = std.EnumArray(Mesh, []const u8).initUndefined();
     for (@typeInfo(Mesh).Enum.fields) |field| {
-        map.put(@field(Mesh, field.name), options.files_folder ++ "/" ++ field.name ++ ".obj");
+        map.set(@field(Mesh, field.name), options.files_folder ++ "/" ++ field.name ++ ".obj");
     }
     break :blk map;
 };
@@ -63,7 +63,7 @@ const RenderObject = struct {
 // TODO: use structs to make this cleaner (i.e. Faces should use names instead of an array of only brain-known values)
 pub fn parseObj(comptime mesh: Mesh) ![]Vertex {
     @setEvalBranchQuota(100000);
-    const file_data = @embedFile(mesh_to_file_map.get(mesh).?);
+    const file_data = @embedFile(MeshPaths.get(mesh));
     var stream = std.io.fixedBufferStream(file_data);
     const reader = stream.reader();
 
@@ -794,9 +794,9 @@ const VulkanRendererImpl = struct {
             }), null, &result.impl.mesh_graphics_pipeline));
         }
 
-        result.impl.mesh_to_gpudata_map = std.EnumArray(Mesh, VulkanMesh).initUndefined();
+        result.impl.mesh_to_gpudata_map = comptime std.EnumArray(Mesh, VulkanMesh).initUndefined();
         inline for (@typeInfo(Mesh).Enum.fields) |field| {
-            result.impl.mesh_to_gpudata_map.set(@field(Mesh, field.name), try VulkanMesh.create(&result.impl, try comptime parseObj(@field(Mesh, field.name))));
+            result.impl.mesh_to_gpudata_map.set(@field(Mesh, field.name), try VulkanMesh.create(&result.impl, comptime try parseObj(@field(Mesh, field.name))));
         }
 
         try result.swapchain_init();

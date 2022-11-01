@@ -38,7 +38,6 @@ const XlibWindowImpl = struct {
         var result = Window{
             .input = input,
         };
-        result.input = input;
         result.impl.dpy = c.XOpenDisplay(null);
         try std.testing.expect(result.impl.dpy != null);
         _ = c.XAutoRepeatOff(result.impl.dpy);
