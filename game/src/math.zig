@@ -16,8 +16,8 @@ pub fn Matrix(
 
         pub fn I() Self {
             var result = O();
-            inline for (result.data) |*row_data, row_index| {
-                row_data.*[row_index] = 1.0;
+            inline for (result.data) |*col_data, col_index| {
+                col_data.*[col_index] = 1.0;
             }
             return result;
         }
