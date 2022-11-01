@@ -10,7 +10,7 @@ const Impl = switch (platform.window_lib) {
 };
 pub usingnamespace Impl;
 
-impl: Impl,
+impl: Impl = undefined,
 x: i16 = 0,
 y: i16 = 0,
 width: u16 = 800,
@@ -35,7 +35,9 @@ const XlibWindowImpl = struct {
     wm_close: c.Atom,
 
     pub fn create(input: *Input) !Window {
-        var result: Window = undefined;
+        var result = Window{
+            .input = input,
+        };
         result.input = input;
         result.impl.dpy = c.XOpenDisplay(null);
         try std.testing.expect(result.impl.dpy != null);
@@ -78,7 +80,6 @@ const XlibWindowImpl = struct {
     }
 
     pub fn destroy(self: Window) void {
-        _ = c.XDestroyWindow(self.impl.dpy, self.impl.win);
         _ = c.XAutoRepeatOn(self.impl.dpy);
         _ = c.XCloseDisplay(self.impl.dpy);
     }

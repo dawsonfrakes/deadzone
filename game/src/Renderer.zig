@@ -12,10 +12,10 @@ const Impl = switch (platform.render_lib) {
 };
 pub usingnamespace Impl;
 
-impl: Impl,
+impl: Impl = undefined,
 time: *const Time,
 window: *const Window,
-view: math.Matrix(f32, 4, 4),
+view: math.Matrix(f32, 4, 4) = math.Matrix(f32, 4, 4).I().translate(.{ 0.0, 0.0, -5.0 }),
 
 // Comptime Mesh constant loader (currently receives values from .options in build.zig)
 // Reads files from src/meshes/* and generates enum values based on them
@@ -465,10 +465,10 @@ const VulkanRendererImpl = struct {
     }
 
     pub fn create(window: *const Window, time: *const Time) !Renderer {
-        var result: Renderer = undefined;
-        result.window = window;
-        result.time = time;
-        result.view = math.Matrix(f32, 4, 4).I().translate(.{ 0.0, 0.0, -5.0 });
+        var result = Renderer{
+            .window = window,
+            .time = time,
+        };
         result.impl.current_frame = 0;
         result.impl.render_objects = std.ArrayList(RenderObject).init(std.heap.c_allocator);
         // createInstance()

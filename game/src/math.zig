@@ -8,7 +8,7 @@ pub fn Matrix(
     return struct {
         const Self = @This();
 
-        data: [w]@Vector(h, T) = I().data,
+        data: [w]@Vector(h, T),
 
         pub fn O() Self {
             return std.mem.zeroes(Self);
