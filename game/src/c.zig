@@ -5,7 +5,8 @@ pub usingnamespace @cImport({
         @cInclude("X11/Xlib.h");
         @cInclude("X11/keysym.h");
     } else if (platform.window_lib == .win32) {
-        @compileError("Win32 windowing not yet supported");
+        @cDefine("WIN32_LEAN_AND_MEAN", {});
+        @cInclude("Windows.h");
     }
 
     if (platform.render_lib == .vulkan) {

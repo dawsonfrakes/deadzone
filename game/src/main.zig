@@ -57,7 +57,10 @@ pub fn main() !void {
     var input = Input{};
     var time = Time.init();
 
-    var window = try Window.create(&input);
+    var window = try (Window{
+        .input = &input,
+        .title = "Hello, world!",
+    }).create();
     defer window.destroy();
 
     var renderer = try Renderer.create(&window, &time);

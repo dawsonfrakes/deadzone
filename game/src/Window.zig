@@ -6,7 +6,7 @@ const Input = @import("Input.zig");
 const Window = @This();
 const Impl = switch (platform.window_lib) {
     .xlib => XlibWindowImpl,
-    .win32 => @compileError("Win32WindowImpl is not yet implemented"),
+    .win32 => Win32WindowImpl,
 };
 pub usingnamespace Impl;
 
@@ -15,6 +15,7 @@ x: i16 = 0,
 y: i16 = 0,
 width: u16 = 800,
 height: u16 = 600,
+title: []const u8 = "Title",
 input: *Input,
 
 const XlibWindowImpl = struct {
@@ -34,10 +35,8 @@ const XlibWindowImpl = struct {
     win: c.Window,
     wm_close: c.Atom,
 
-    pub fn create(input: *Input) !Window {
-        var result = Window{
-            .input = input,
-        };
+    pub fn create(init: Window) !Window {
+        var result = init;
         result.impl.dpy = c.XOpenDisplay(null);
         try std.testing.expect(result.impl.dpy != null);
         _ = c.XAutoRepeatOff(result.impl.dpy);
@@ -47,6 +46,7 @@ const XlibWindowImpl = struct {
         result.impl.win = c.XCreateWindow(result.impl.dpy, root, result.x, result.y, result.width, result.height, 0, c.CopyFromParent, c.InputOutput, c.CopyFromParent, c.CWEventMask, &s);
         result.impl.wm_close = c.XInternAtom(result.impl.dpy, "WM_DELETE_WINDOW", c.False);
         _ = c.XSetWMProtocols(result.impl.dpy, result.impl.win, &result.impl.wm_close, 1);
+        _ = c.XStoreName(result.impl.dpy, result.impl.win, @ptrCast([*c]const u8, result.title));
         _ = c.XMapWindow(result.impl.dpy, result.impl.win);
         return result;
     }
@@ -81,5 +81,62 @@ const XlibWindowImpl = struct {
     pub fn destroy(self: Window) void {
         _ = c.XAutoRepeatOn(self.impl.dpy);
         _ = c.XCloseDisplay(self.impl.dpy);
+    }
+};
+
+const Win32WindowImpl = struct {
+    const win = std.os.windows;
+    comptime {
+        @compileError("Not yet implemented");
+    }
+
+    inst: win.HINSTANCE,
+    hwnd: win.HWND,
+
+    pub fn create(init: Window) !Window {
+        var result = init;
+        result.impl.inst = @ptrCast(win.HINSTANCE, win.kernel32.GetModuleHandleW(null).?);
+        _ = try win.user32.registerClassExA(&.{
+            .style = win.user32.CS_OWNDC | win.user32.CS_VREDRAW | win.user32.CS_HREDRAW,
+            .lpfnWndProc = windowProc,
+            .hInstance = result.impl.inst,
+            .hIcon = null,
+            .hCursor = null,
+            .hbrBackground = null,
+            .lpszMenuName = null,
+            .lpszClassName = "muh_class",
+            .hIconSm = null,
+        });
+        result.impl.hwnd = try win.user32.createWindowExA(
+            0,
+            "muh_class",
+            result.title[0.. :0],
+            win.user32.WS_OVERLAPPEDWINDOW | win.user32.WS_VISIBLE,
+            win.user32.CW_USEDEFAULT,
+            win.user32.CW_USEDEFAULT,
+            win.user32.CW_USEDEFAULT,
+            win.user32.CW_USEDEFAULT,
+            null,
+            null,
+            result.impl.inst,
+            null,
+        );
+        return result;
+    }
+
+    fn windowProc(hwnd: win.HWND, msg: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM) callconv(win.WINAPI) win.LRESULT {
+        return win.user32.defWindowProcA(hwnd, msg, wparam, lparam);
+    }
+
+    pub fn update(self: *Window) ?void {
+        var msg: win.user32.MSG = undefined;
+        while (try win.user32.peekMessageA(&msg, self.impl.hwnd, 0, 0, win.user32.PM_REMOVE)) {
+            win.user32.translateMessage(&msg);
+            _ = win.user32.dispatchMessageA(&msg);
+        }
+    }
+
+    pub fn destroy(self: Window) void {
+        _ = self;
     }
 };
