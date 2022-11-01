@@ -15,6 +15,7 @@ pub usingnamespace Impl;
 impl: Impl,
 time: *const Time,
 window: *const Window,
+view: math.Matrix(f32, 4, 4),
 
 // Comptime Mesh constant loader (currently receives values from .options in build.zig)
 // Reads files from src/meshes/* and generates enum values based on them
@@ -467,6 +468,7 @@ const VulkanRendererImpl = struct {
         var result: Renderer = undefined;
         result.window = window;
         result.time = time;
+        result.view = math.Matrix(f32, 4, 4).I().translate(.{ 0.0, 0.0, -5.0 });
         result.impl.current_frame = 0;
         result.impl.render_objects = std.ArrayList(RenderObject).init(std.heap.c_allocator);
         // createInstance()
@@ -844,11 +846,10 @@ const VulkanRendererImpl = struct {
             .extent = self.impl.surface_capabilities.currentExtent,
         }));
         // we can comptime a matrix up to its first non-comptime value usage
-        const view = comptime math.Matrix(f32, 4, 4).I().translate(.{ 0.0, 0.0, -5.0 });
         const projection = math.Matrix(f32, 4, 4).Perspective(std.math.pi / 2.0, @intToFloat(f32, self.window.width) / @intToFloat(f32, self.window.height), 0.1, 100.0);
         for (self.impl.render_objects.items) |object| {
             c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-                .mvp = projection.mul(view).mul(object.transform),
+                .mvp = projection.mul(self.view).mul(object.transform),
             }));
             const gpumesh = self.impl.mesh_to_gpudata_map.get(object.mesh);
             c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpumesh.buffer.buffer, &[_]c.VkDeviceSize{0});
