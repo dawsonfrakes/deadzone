@@ -16,6 +16,7 @@ impl: Impl = undefined,
 time: *const Time,
 window: *const Window,
 view: math.Matrix(f32, 4, 4) = math.Matrix(f32, 4, 4).I().translate(.{ 0.0, 0.0, -5.0 }),
+projection: math.Matrix(f32, 4, 4) = math.Matrix(f32, 4, 4).I(),
 
 // Comptime Mesh constant loader (currently receives values from .options in build.zig)
 // Reads files from src/meshes/* and generates enum values based on them
@@ -61,13 +62,13 @@ const RenderObject = struct {
 };
 
 // TODO: use structs to make this cleaner (i.e. Faces should use names instead of an array of only brain-known values)
-pub fn parseObj(comptime mesh: Mesh) ![]Vertex {
+fn parseObj(comptime mesh: Mesh) ![]Vertex {
     @setEvalBranchQuota(100000);
     const file_data = @embedFile(MeshPaths.get(mesh));
     var stream = std.io.fixedBufferStream(file_data);
     const reader = stream.reader();
 
-    const max_line_len = @sizeOf(@TypeOf(file_data.*));
+    const max_line_len = @sizeOf(@TypeOf(file_data.*)) - 1;
     var buf: [max_line_len]u8 = undefined;
 
     var vertices: [max_line_len]@Vector(3, f32) = undefined;
@@ -350,6 +351,11 @@ const VulkanRendererImpl = struct {
         // getSurfaceInfo()
         {
             try vkCheck(c.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(self.impl.physical_device, self.impl.surface, &self.impl.surface_capabilities));
+        }
+        // recalculateProjectionMatrix()
+        {
+            // TODO: Move this to a Window resize callback/event rather than relying on Vulkan swapchain reinit
+            self.projection = math.Matrix(f32, 4, 4).Perspective(std.math.pi / 2.0, @intToFloat(f32, self.impl.surface_capabilities.currentExtent.width) / @intToFloat(f32, self.impl.surface_capabilities.currentExtent.height), 0.1, 100.0);
         }
         // getMinimumImageCount()
         {
@@ -836,11 +842,11 @@ const VulkanRendererImpl = struct {
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.impl.surface_capabilities.currentExtent,
         }));
-        // we can comptime a matrix up to its first non-comptime value usage
-        const projection = math.Matrix(f32, 4, 4).Perspective(std.math.pi / 2.0, @intToFloat(f32, self.window.width) / @intToFloat(f32, self.window.height), 0.1, 100.0);
+        // NOTE: we could choose to only update vp when view or projection changes but it's likely view will change every frame during actual gameplay
+        const vp = self.projection.mul(self.view);
         for (self.impl.render_objects.items) |object| {
             c.vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-                .mvp = projection.mul(self.view).mul(object.transform),
+                .mvp = vp.mul(object.transform),
             }));
             const gpumesh = self.impl.mesh_to_gpudata_map.get(object.mesh);
             c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpumesh.buffer.buffer, &[_]c.VkDeviceSize{0});
