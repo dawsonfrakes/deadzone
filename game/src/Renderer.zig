@@ -695,26 +695,17 @@ const VulkanRendererImpl = struct {
                 },
             }), null, &result.impl.render_pass));
         }
-        var vertex_shader_module: c.VkShaderModule = undefined;
-        var fragment_shader_module: c.VkShaderModule = undefined;
         // createShaders()
+        var shader_module: c.VkShaderModule = undefined;
         {
-            const vertex_shader_code = @alignCast(4, @embedFile("shaders/mesh.vert.spv"));
+            const code = @alignCast(4, @embedFile("shaders/mesh.spv"));
             try vkCheck(c.vkCreateShaderModule(result.impl.device, &zi(c.VkShaderModuleCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                .codeSize = vertex_shader_code.len,
-                .pCode = @ptrCast(*const u32, vertex_shader_code),
-            }), null, &vertex_shader_module));
-
-            const fragment_shader_code = @alignCast(4, @embedFile("shaders/mesh.frag.spv"));
-            try vkCheck(c.vkCreateShaderModule(result.impl.device, &zi(c.VkShaderModuleCreateInfo, .{
-                .sType = c.VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-                .codeSize = fragment_shader_code.len,
-                .pCode = @ptrCast(*const u32, fragment_shader_code),
-            }), null, &fragment_shader_module));
+                .codeSize = code.len,
+                .pCode = @ptrCast(*const u32, code),
+            }), null, &shader_module));
         }
-        defer c.vkDestroyShaderModule(result.impl.device, vertex_shader_module, null);
-        defer c.vkDestroyShaderModule(result.impl.device, fragment_shader_module, null);
+        defer c.vkDestroyShaderModule(result.impl.device, shader_module, null);
         // createGraphicsPipelineLayout()
         {
             try vkCheck(c.vkCreatePipelineLayout(result.impl.device, &zi(c.VkPipelineLayoutCreateInfo, .{
@@ -733,13 +724,13 @@ const VulkanRendererImpl = struct {
                 zi(c.VkPipelineShaderStageCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                     .stage = c.VK_SHADER_STAGE_VERTEX_BIT,
-                    .module = vertex_shader_module,
+                    .module = shader_module,
                     .pName = "main",
                 }),
                 zi(c.VkPipelineShaderStageCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                     .stage = c.VK_SHADER_STAGE_FRAGMENT_BIT,
-                    .module = fragment_shader_module,
+                    .module = shader_module,
                     .pName = "main",
                 }),
             };

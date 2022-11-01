@@ -44,11 +44,17 @@ pub fn build(b: *std.build.Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    // TODO: eventually these will be built at comptime with libshaderc and
+    // an enum will be generated to indicate which shader to use
+    // Example: fn use(shader: Shader) {} will look like this => use(.mesh);
     const shaders_step = b.step("shaders", "Compile SPIR-V shaders");
-    const vshad = b.addSystemCommand(&[_][]const u8{ "glslc", "src/shaders/mesh.vert", "-o", "src/shaders/mesh.vert.spv" });
-    const fshad = b.addSystemCommand(&[_][]const u8{ "glslc", "src/shaders/mesh.frag", "-o", "src/shaders/mesh.frag.spv" });
-    shaders_step.dependOn(&vshad.step);
-    shaders_step.dependOn(&fshad.step);
+    const spvgen = b.addSystemCommand(&[_][]const u8{
+        "/usr/bin/env",
+        "bash",
+        "-c",
+        "spirv-link <(glslc src/shaders/mesh.vert -o -) <(glslc src/shaders/mesh.frag -o -) -o src/shaders/mesh.spv",
+    });
+    shaders_step.dependOn(&spvgen.step);
 
     const exe_tests = b.addTest("src/main.zig");
     exe_tests.setTarget(target);
