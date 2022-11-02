@@ -17,6 +17,12 @@ int main(void)
     Input input = {0};
     GameWindow window = window_init(&input, "Hello, world!");
     GameRenderer renderer = renderer_init(&window);
+    ArrayList_append(renderer.render_objects, (&(RenderObject) {
+        .mesh = MESH_CUBE,
+        .transform = {
+            .scale = { 1.0f, 1.0f, 1.0f }
+        }
+    }));
 
     // loop until quit
     for (;;) {

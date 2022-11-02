@@ -3,6 +3,7 @@
 #include "defines.h"
 #include "platform.h"
 #include "window.h"
+#include "arraylist.h"
 
 #if RENDERING_API == RAPI_VULKAN
 #if WINDOWING_API == WAPI_WIN32
@@ -15,9 +16,83 @@
 #include <vulkan/vulkan.h>
 #endif
 
+typedef struct Transform {
+    f32 position[3];
+    f32 rotation[3];
+    f32 scale[3];
+} Transform;
+
+typedef struct MeshData {
+    u16 draw_count;
+
+#if RENDERING_API == RAPI_VULKAN
+    VkBuffer buffer;
+#endif
+} MeshData;
+
+// TODO: gen this at comptime based on files
+typedef struct Vertex {
+    f32 position[3];
+    f32 normal[3];
+    f32 texcoord[2];
+} Vertex;
+
+typedef struct MeshPushConstants {
+    f32 mvp[4][4];
+} MeshPushConstants;
+static const VkVertexInputBindingDescription vertex_bindings[] = {
+    {
+        .binding = 0,
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+        .stride = sizeof(Vertex),
+    }
+};
+static const usize vertex_bindings_len = len(vertex_bindings);
+
+static const VkVertexInputAttributeDescription vertex_attributes[] = {
+    {
+        .binding = 0,
+        .location = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, position),
+    },
+    {
+        .binding = 0,
+        .location = 1,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, normal),
+    },
+    {
+        .binding = 0,
+        .location = 2,
+        .format = VK_FORMAT_R32G32_SFLOAT,
+        .offset = offsetof(Vertex, texcoord),
+    },
+};
+static const usize vertex_attributes_len = len(vertex_attributes);
+
+enum Mesh {
+    MESH_CUBE,
+    MESH_TRIANGLE,
+    MESH_LENGTH,
+};
+
+static const char *mesh_filename[MESH_LENGTH] = {
+    [MESH_CUBE] = "meshes/cube.obj",
+    [MESH_TRIANGLE] = "meshes/triangle.obj",
+};
+// ENDTODO
+
+typedef struct RenderObject {
+    Transform transform;
+    enum Mesh mesh;
+} RenderObject;
+
 typedef struct GameRenderer {
     f32 projection[4][4];
     f32 view[4][4];
+    ArrayList/*RenderObject*/ render_objects;
+    MeshData meshes[MESH_LENGTH]/* -> EnumArray(Mesh, MeshData) */;
 
 #if RENDERING_API == RAPI_VULKAN
     #define max_frames_rendering_at_once 2

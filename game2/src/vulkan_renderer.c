@@ -123,7 +123,9 @@ static void swapchain_reinit(GameRenderer *const renderer)
 
 GameRenderer renderer_init(const GameWindow *const window)
 {
-    GameRenderer result = {0};
+    GameRenderer result = {
+        .render_objects = ArrayList_init(RenderObject),
+    };
     // createInstance()
     {
         const char window_extension[] =
@@ -254,13 +256,13 @@ GameRenderer renderer_init(const GameWindow *const window)
                     .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                     .queueFamilyIndex = result.graphics_queue_family_index,
                     .queueCount = 1,
-                    .pQueuePriorities = (const float []){ 1.0 },
+                    .pQueuePriorities = (const f32 []){ 1.0f },
                 },
                 {
                     .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                     .queueFamilyIndex = result.graphics_queue_family_index,
                     .queueCount = 1,
-                    .pQueuePriorities = (const float []){ 1.0 },
+                    .pQueuePriorities = (const f32 []){ 1.0f },
                 },
             },
             .pEnabledFeatures = &(const VkPhysicalDeviceFeatures) {0},
@@ -382,12 +384,12 @@ GameRenderer renderer_init(const GameWindow *const window)
     {
         vkCheck(vkCreatePipelineLayout(result.device, &(const VkPipelineLayoutCreateInfo) {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            // .pushConstantRangeCount = 1,
-            // .pPushConstantRanges = &(const VkPushConstantRange) {
-            //     .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
-            //     .offset = 0,
-            //     .size = sizeof(MeshPushConstants),
-            // },
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &(const VkPushConstantRange) {
+                .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+                .offset = 0,
+                .size = sizeof(MeshPushConstants),
+            },
         }, null, &result.mesh_graphics_pipeline_layout));
     }
     // createGraphicsPipeline()
@@ -409,17 +411,16 @@ GameRenderer renderer_init(const GameWindow *const window)
         const VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         const VkPolygonMode polygon_mode = VK_POLYGON_MODE_FILL;
         const VkPipelineLayout layout = result.mesh_graphics_pipeline_layout;
-        // const desc = vertex_input_description();
         vkCheck(vkCreateGraphicsPipelines(result.device, null, 1, &(const VkGraphicsPipelineCreateInfo) {
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
             .stageCount = len(stages),
             .pStages = stages,
             .pVertexInputState = &(const VkPipelineVertexInputStateCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                // .vertexBindingDescriptionCount = desc.bindings.len,
-                // .pVertexBindingDescriptions = desc.bindings,
-                // .vertexAttributeDescriptionCount = desc.attributes.len,
-                // .pVertexAttributeDescriptions = desc.attributes,
+                .vertexBindingDescriptionCount = vertex_bindings_len,
+                .pVertexBindingDescriptions = vertex_bindings,
+                .vertexAttributeDescriptionCount = vertex_attributes_len,
+                .pVertexAttributeDescriptions = vertex_attributes,
             },
             .pInputAssemblyState = &(const VkPipelineInputAssemblyStateCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -435,7 +436,7 @@ GameRenderer renderer_init(const GameWindow *const window)
                 .polygonMode = polygon_mode,
                 .cullMode = VK_CULL_MODE_BACK_BIT,
                 .frontFace = VK_FRONT_FACE_CLOCKWISE,
-                .lineWidth = 1.0,
+                .lineWidth = 1.0f,
             },
             .pMultisampleState = &(const VkPipelineMultisampleStateCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -510,25 +511,19 @@ void record_buffer(const GameRenderer *const renderer, VkCommandBuffer buffer, u
         .offset = { .x = 0, .y = 0 },
         .extent = renderer->surface_capabilities.currentExtent,
     });
-    // NOTE: we could choose to only update vp when view or projection changes but it's likely view will change every frame during actual gameplay
-    // const vp = self.projection.mul(self.view);
-    // for (self.impl.render_objects.items) |object| {
-    //     vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-    //         .mvp = vp.mul(object.transform.matrix()),
-    //     }));
-    //     const gpumesh = self.impl.mesh_to_gpudata_map.get(object.mesh);
-    //     vkCmdBindVertexBuffers(buffer, 0, 1, &gpumesh.buffer.buffer, &[_]VkDeviceSize{0});
-    //     vkCmdDraw(buffer, gpumesh.draw_count, 1, 0, 0);
+    vkCmdPushConstants(buffer, renderer->mesh_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &(const MeshPushConstants) {
+        .mvp = {
+            { 1.0f, 0.0f, 0.0f, 0.0f },
+            { 0.0f, 1.0f, 0.0f, 0.0f },
+            { 0.0f, 0.0f, 1.0f, 0.0f },
+            { 0.0f, 0.0f, 0.0f, 1.0f },
+        },
+    });
+    // for (usize i = 0; renderer->render_objects.length; ++i) {
+    //     const MeshData *meshdata = renderer->meshes+((RenderObject *)ArrayList_get(renderer->render_objects, i))->mesh;
+    //     vkCmdBindVertexBuffers(buffer, 0, 1, &meshdata->buffer, (VkDeviceSize []){0});
+    //     vkCmdDraw(buffer, meshdata->draw_count, 1, 0, 0);
     // }
-    // for (self.impl.render_objects_dyn.items) |object_ptr| {
-    //     vkCmdPushConstants(buffer, self.impl.mesh_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-    //         .mvp = vp.mul(object_ptr.*.transform.matrix()),
-    //     }));
-    //     const gpumesh = self.impl.mesh_to_gpudata_map.get(object_ptr.*.mesh);
-    //     vkCmdBindVertexBuffers(buffer, 0, 1, &gpumesh.buffer.buffer, &[_]VkDeviceSize{0});
-    //     vkCmdDraw(buffer, gpumesh.draw_count, 1, 0, 0);
-    // }
-    vkCmdDraw(buffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(buffer);
     vkCheck(vkEndCommandBuffer(buffer));
 }
@@ -586,8 +581,7 @@ void renderer_update(GameRenderer *const renderer)
 void renderer_deinit(const GameRenderer *const renderer)
 {
     swapchain_deinit(renderer);
-    // self.impl.render_objects_dyn.deinit();
-    // self.impl.render_objects.deinit();
+    ArrayList_deinit(renderer->render_objects);
     // inline for (@typeInfo(Mesh).Enum.fields) |field| {
     //     self.impl.mesh_to_gpudata_map.get(@field(Mesh, field.name)).destroy();
     // }
