@@ -488,7 +488,13 @@ const VulkanRendererImpl = struct {
         // createInstance()
         {
             const instance_layers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
-            const instance_extensions = [_][*c]const u8{ c.VK_KHR_SURFACE_EXTENSION_NAME, c.VK_KHR_XLIB_SURFACE_EXTENSION_NAME };
+            const instance_extensions = [_][*c]const u8{
+                c.VK_KHR_SURFACE_EXTENSION_NAME,
+                if (platform.window_lib == .win32)
+                    c.VK_KHR_WIN32_SURFACE_EXTENSION_NAME
+                else if (platform.window_lib == .xlib)
+                    c.VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+            };
             try vkCheck(c.vkCreateInstance(&zi(c.VkInstanceCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
                 .pApplicationInfo = &zi(c.VkApplicationInfo, .{
@@ -521,7 +527,15 @@ const VulkanRendererImpl = struct {
                 .dpy = window.impl.dpy,
                 .window = window.impl.win,
             }), null, &result.impl.surface)),
-            else => std.debug.print("Windowing system not supported by Vulkan\n", .{}),
+            .win32 => {
+                var hwnd = window.impl.hwnd;
+                var inst = window.impl.inst;
+                try vkCheck(c.vkCreateWin32SurfaceKHR(result.impl.instance, &zi(c.VkWin32SurfaceCreateInfoKHR, .{
+                    .sType = c.VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+                    .hwnd = @ptrCast(*c.HWND, &hwnd).*,
+                    .hinstance = @ptrCast(*c.HINSTANCE, &inst).*,
+                }), null, &result.impl.surface));
+            },
         }
         // selectSurfaceFormat()
         result.impl.surface_format = blk: {

@@ -27,10 +27,18 @@ pub fn build(b: *std.build.Builder) !void {
     exe.linkLibC();
     switch (platform.window_lib) {
         .xlib => exe.linkSystemLibrary("X11"),
-        .win32 => @compileError("WIN32 not yet supported"),
+        .win32 => {},
     }
     switch (platform.render_lib) {
-        .vulkan => exe.linkSystemLibrary("vulkan"),
+        .vulkan => switch (platform.window_lib) {
+            .xlib => exe.linkSystemLibrary("vulkan"),
+            .win32 => {
+                // TODO: use VULKAN_SDK envvar
+                exe.addIncludePath("C:/VulkanSDK/1.3.231.1/Include");
+                exe.addLibraryPath("C:/VulkanSDK/1.3.231.1/Lib");
+                exe.linkSystemLibrary("vulkan-1");
+            }
+        },
     }
     exe.addOptions("options", options);
     exe.install();

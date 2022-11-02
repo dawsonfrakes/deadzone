@@ -15,7 +15,7 @@ x: i16 = 0,
 y: i16 = 0,
 width: u16 = 800,
 height: u16 = 600,
-title: []const u8 = "Title",
+title: [:0]const u8 = "Title",
 input: *Input,
 
 const XlibWindowImpl = struct {
@@ -86,9 +86,6 @@ const XlibWindowImpl = struct {
 
 const Win32WindowImpl = struct {
     const win = std.os.windows;
-    comptime {
-        @compileError("Not yet implemented");
-    }
 
     inst: win.HINSTANCE,
     hwnd: win.HWND,
@@ -110,7 +107,7 @@ const Win32WindowImpl = struct {
         result.impl.hwnd = try win.user32.createWindowExA(
             0,
             "muh_class",
-            result.title[0.. :0],
+            result.title,
             win.user32.WS_OVERLAPPEDWINDOW | win.user32.WS_VISIBLE,
             win.user32.CW_USEDEFAULT,
             win.user32.CW_USEDEFAULT,
@@ -130,8 +127,11 @@ const Win32WindowImpl = struct {
 
     pub fn update(self: *Window) ?void {
         var msg: win.user32.MSG = undefined;
-        while (try win.user32.peekMessageA(&msg, self.impl.hwnd, 0, 0, win.user32.PM_REMOVE)) {
-            win.user32.translateMessage(&msg);
+        while (win.user32.peekMessageA(&msg, self.impl.hwnd, 0, 0, win.user32.PM_REMOVE) catch unreachable) {
+            if (msg.message == win.user32.WM_QUIT) {
+                return null;
+            }
+            _ = win.user32.translateMessage(&msg);
             _ = win.user32.dispatchMessageA(&msg);
         }
     }
