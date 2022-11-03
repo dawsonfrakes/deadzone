@@ -11,6 +11,8 @@
 #include <vulkan/vulkan.h>
 #endif
 
+#include "../out/comptime.h"
+
 typedef struct MeshData {
     u16 draw_count;
 
@@ -18,60 +20,6 @@ typedef struct MeshData {
     VkBuffer buffer;
 #endif
 } MeshData;
-
-// TODO: gen this at comptime based on files
-typedef struct Vertex {
-    V3 position;
-    V3 normal;
-    V2 texcoord;
-} Vertex;
-
-typedef struct MeshPushConstants {
-    M4 mvp;
-} MeshPushConstants;
-static const VkVertexInputBindingDescription vertex_bindings[] = {
-    {
-        .binding = 0,
-        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-        .stride = sizeof(Vertex),
-    }
-};
-static const usize vertex_bindings_len = len(vertex_bindings);
-
-static const VkVertexInputAttributeDescription vertex_attributes[] = {
-    {
-        .binding = 0,
-        .location = 0,
-        .format = VK_FORMAT_R32G32B32_SFLOAT,
-        .offset = offsetof(Vertex, position),
-    },
-    {
-        .binding = 0,
-        .location = 1,
-        .format = VK_FORMAT_R32G32B32_SFLOAT,
-        .offset = offsetof(Vertex, normal),
-    },
-    {
-        .binding = 0,
-        .location = 2,
-        .format = VK_FORMAT_R32G32_SFLOAT,
-        .offset = offsetof(Vertex, texcoord),
-    },
-};
-static const usize vertex_attributes_len = len(vertex_attributes);
-
-enum Mesh {
-    MESH_CUBE,
-    MESH_TRIANGLE,
-    MESH_LENGTH,
-};
-
-// NOTE: remove this. the paths are not going to be required since we'll load them into variables at comptime
-static const char *mesh_filename[MESH_LENGTH] = {
-    [MESH_CUBE] = "meshes/cube.obj",
-    [MESH_TRIANGLE] = "meshes/triangle.obj",
-};
-// ENDTODO
 
 typedef struct RenderObject {
     Transform transform;
@@ -136,7 +84,7 @@ static void swapchain_init(GameRenderer *const renderer)
     // recalculateProjectionMatrix()
     {
         // TODO: Move this to a Window resize callback/event rather than relying on Vulkan swapchain reinit
-        renderer->projection = m4perspective(pi / 2.0f, (f32) renderer->surface_capabilities.currentExtent.width / renderer->surface_capabilities.currentExtent.height, 0.1, 100.0);
+        renderer->projection = m4perspective(pi32 / 2.0f, (f32) renderer->surface_capabilities.currentExtent.width / renderer->surface_capabilities.currentExtent.height, 0.1, 100.0);
     }
     // getMinimumImageCount()
     {
@@ -490,14 +438,13 @@ GameRenderer renderer_init(const GameWindow *const window)
         }, null, &result.render_pass));
     }
     // createShaders()
-    #include "../out/mesh.spv.h"
     VkShaderModule shader_module;
     {
-        const b32 modcheck = meshspv_len % 4 == 0;
+        const b32 modcheck = len(meshspv) % 4 == 0;
         assert(modcheck);
         vkCheck(vkCreateShaderModule(result.device, &(const VkShaderModuleCreateInfo) {
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-            .codeSize = meshspv_len,
+            .codeSize = len(meshspv),
             .pCode = (const u32 *) meshspv,
         }, null, &shader_module));
     }

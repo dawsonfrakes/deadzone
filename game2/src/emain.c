@@ -2,10 +2,9 @@
 #include "engine.h"
 
 // REMAINING ELEMENTS OF PORT
-// Comptime enum & variable data generaton from ./shaders/* and ./meshes/*
-// OBJ Parsing
 // Buffer Creation
 // Image Creation -> Depth Buffer
+// Time
 
 static b32 game_update(const Input input)
 {
