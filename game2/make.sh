@@ -4,12 +4,14 @@
 
 set -e
 
+CC="${CC:-"zig cc"}"
+
+mkdir -p out
 case "$1" in
     build)
-        mkdir -p out
         case "$2" in
-            linux) zig cc src/{engine_main.c,xlib_window.c,vulkan_renderer.c} -lX11 -lvulkan -o out/game ;;
-            windows) zig cc -target x86_64-windows src/{engine_main.c,win32_window.c,vulkan_renderer.c} -lvulkan-1 -o out/game.exe ;;
+            linux) $CC src/{engine_main.c,xlib_window.c,vulkan_renderer.c} -lX11 -lvulkan -o out/game ;;
+            windows) $CC -target x86_64-windows src/{engine_main.c,win32_window.c,vulkan_renderer.c} -lvulkan-1 -o out/game.exe ;;
             *) echo "usage: $0 build <linux|windows>"; exit 1 ;;
         esac
     ;;
