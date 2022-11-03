@@ -6,13 +6,20 @@ typedef struct V4 { f32 x, y, z, w; } V4;
 
 #define viterptr(v) ((f32 *) &v)
 #define viterptrconst(v) ((const f32 *) &v)
-#define V40 { .x = 0.0f, .y = 0.0f, .z = 0.0f, .w = 0.0f }
+#define V2O { .x = 0.0f, .y = 0.0f }
+#define V2I { .x = 1.0f, .y = 1.0f }
+#define V3O { .x = 0.0f, .y = 0.0f, .z = 0.0f }
+#define V3I { .x = 1.0f, .y = 1.0f, .z = 1.0f }
+#define V4O { .x = 0.0f, .y = 0.0f, .z = 0.0f, .w = 0.0f }
+#define V4I { .x = 1.0f, .y = 1.0f, .z = 1.0f, .w = 1.0f }
 
 typedef struct Transform {
     V3 position;
     V3 rotation;
     V3 scale;
 } Transform;
+
+#define TFI { .position = V3O, .rotation = V3O, .scale = V3I }
 
 typedef struct M4 {
     f32 m[4][4];
@@ -63,7 +70,7 @@ M4 m4mul(M4 a, M4 b)
 
 V4 m4mulv4(M4 a, V4 b)
 {
-    V4 result = V40;
+    V4 result = V4O;
     for (int row = 0; row < 4; ++row)
         for (int i = 0; i < 4; ++i)
             viterptr(result)[i] += a.m[i][row] * viterptrconst(b)[i];

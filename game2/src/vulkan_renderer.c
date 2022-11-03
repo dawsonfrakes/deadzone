@@ -511,7 +511,7 @@ void record_buffer(const GameRenderer *const renderer, VkCommandBuffer buffer, u
     const M4 vp = m4mul(renderer->projection, renderer->view);
     for (usize i = 0; i < renderer->render_objects.length; ++i) {
         const RenderObject *object = (RenderObject *)ArrayList_get(renderer->render_objects, i);
-        const MeshData *meshdata = renderer->meshes+object->mesh;
+        // const MeshData *meshdata = renderer->meshes+object->mesh;
         vkCmdPushConstants(buffer, renderer->mesh_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &(const MeshPushConstants) {
             .mvp = m4mul(vp, m4transform(object->transform)),
         });

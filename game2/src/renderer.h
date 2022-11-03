@@ -66,6 +66,7 @@ enum Mesh {
     MESH_LENGTH,
 };
 
+// NOTE: remove this. the paths are not going to be required since we'll load them into variables at comptime
 static const char *mesh_filename[MESH_LENGTH] = {
     [MESH_CUBE] = "meshes/cube.obj",
     [MESH_TRIANGLE] = "meshes/triangle.obj",
