@@ -1,9 +1,5 @@
 #pragma once
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
 typedef struct ArrayList {
     size_t size;
     size_t length;

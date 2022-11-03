@@ -1,9 +1,5 @@
 #pragma once
 
-#include "defines.h"
-#include "platform.h"
-#include "input.h"
-
 #if WINDOWING_API == WAPI_WIN32
     #include <windows.h>
 #elif WINDOWING_API == WAPI_XLIB

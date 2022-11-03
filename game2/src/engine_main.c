@@ -1,11 +1,9 @@
-#define MAINFILE
-#include "input.h"
-#include "window.h"
-#include "renderer.h"
+#define __main__
+#include "core.h"
 
 static b32 game_update(const Input input)
 {
-    if (input_just_pressed(input, KEY_ESCAPE) || input_just_pressed(input, KEY_Q))
+    if (input_just_pressed(KEY_ESCAPE) || input_just_pressed(KEY_Q))
         return false;
 
     return true;
@@ -17,6 +15,7 @@ int main(void)
     Input input = {0};
     GameWindow window = window_init(&input, "Hello, world!");
     GameRenderer renderer = renderer_init(&window);
+    renderer.view = m4translate((V3) {0.0f, 0.0f, -5.0f});
     ArrayList_append(renderer.render_objects, (&(RenderObject) {
         .mesh = MESH_CUBE,
         .transform = {
@@ -27,7 +26,7 @@ int main(void)
     // loop until quit
     for (;;) {
         // update subsystems
-        input_prepare(&input);
+        input_prepare();
         if (!window_update(&window)) break;
             // update game
             if (!game_update(input)) break;

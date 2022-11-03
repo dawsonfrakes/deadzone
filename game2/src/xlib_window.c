@@ -1,7 +1,4 @@
-#include "window.h"
-
-#include <stdio.h>
-#include <stdlib.h>
+#include "core.h"
 #include <X11/keysym.h>
 
 GameWindow window_init(Input *const input, const char *const title)

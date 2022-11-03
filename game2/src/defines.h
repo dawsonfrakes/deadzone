@@ -1,11 +1,12 @@
 #pragma once
 
-#include <stdint.h>
-
 #define null ((void *)0)
 #define true 1
 #define false 0
 #define assert(check) do { if (!(check)) { fprintf(stderr, #check "\n"); abort(); } } while (0)
+#define pi 3.141597f
+#define rad(d) (d*(pi/180.0f))
+#define deg(r) (r*(180.0f/pi))
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define len(array) (sizeof(array)/sizeof((array)[0]))

@@ -1,6 +1,4 @@
-#include "window.h"
-
-#include <stdio.h>
+#include "core.h"
 
 GameWindow window_init(Input *const input, const char *const title)
 {

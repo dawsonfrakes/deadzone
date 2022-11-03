@@ -1,10 +1,5 @@
 #pragma once
 
-#include "defines.h"
-#include "platform.h"
-#include "window.h"
-#include "arraylist.h"
-
 #if RENDERING_API == RAPI_VULKAN
 #if WINDOWING_API == WAPI_WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -16,12 +11,6 @@
 #include <vulkan/vulkan.h>
 #endif
 
-typedef struct Transform {
-    f32 position[3];
-    f32 rotation[3];
-    f32 scale[3];
-} Transform;
-
 typedef struct MeshData {
     u16 draw_count;
 
@@ -32,13 +21,13 @@ typedef struct MeshData {
 
 // TODO: gen this at comptime based on files
 typedef struct Vertex {
-    f32 position[3];
-    f32 normal[3];
-    f32 texcoord[2];
+    V3 position;
+    V3 normal;
+    V2 texcoord;
 } Vertex;
 
 typedef struct MeshPushConstants {
-    f32 mvp[4][4];
+    M4 mvp;
 } MeshPushConstants;
 static const VkVertexInputBindingDescription vertex_bindings[] = {
     {
@@ -89,8 +78,8 @@ typedef struct RenderObject {
 } RenderObject;
 
 typedef struct GameRenderer {
-    f32 projection[4][4];
-    f32 view[4][4];
+    M4 projection;
+    M4 view;
     ArrayList/*RenderObject*/ render_objects;
     MeshData meshes[MESH_LENGTH]/* -> EnumArray(Mesh, MeshData) */;
 

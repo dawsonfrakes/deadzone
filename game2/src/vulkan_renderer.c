@@ -1,7 +1,4 @@
-#include "renderer.h"
-
-#include <stdio.h>
-#include <stdlib.h>
+#include "core.h"
 
 #define vkCheck(check) do { if ((check) != VK_SUCCESS) { fprintf(stderr, #check"\n"); abort(); } } while (0)
 
@@ -12,11 +9,11 @@ static void swapchain_init(GameRenderer *const renderer)
     {
         vkCheck(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(renderer->physical_device, renderer->surface, &renderer->surface_capabilities));
     }
-    // // recalculateProjectionMatrix()
-    // {
-    //     // TODO: Move this to a Window resize callback/event rather than relying on Vulkan swapchain reinit
-    //     renderer->projection = math.Matrix(f32, 4, 4).Perspective(std.math.pi / 2.0, @intToFloat(f32, self.impl.surface_capabilities.currentExtent.width) / @intToFloat(f32, self.impl.surface_capabilities.currentExtent.height), 0.1, 100.0);
-    // }
+    // recalculateProjectionMatrix()
+    {
+        // TODO: Move this to a Window resize callback/event rather than relying on Vulkan swapchain reinit
+        renderer->projection = m4perspective(pi / 2.0f, (f32) renderer->surface_capabilities.currentExtent.width / renderer->surface_capabilities.currentExtent.height, 0.1, 100.0);
+    }
     // getMinimumImageCount()
     {
         renderer->image_count = max(renderer->surface_capabilities.minImageCount, max_frames_rendering_at_once);
@@ -417,10 +414,10 @@ GameRenderer renderer_init(const GameWindow *const window)
             .pStages = stages,
             .pVertexInputState = &(const VkPipelineVertexInputStateCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                .vertexBindingDescriptionCount = vertex_bindings_len,
-                .pVertexBindingDescriptions = vertex_bindings,
-                .vertexAttributeDescriptionCount = vertex_attributes_len,
-                .pVertexAttributeDescriptions = vertex_attributes,
+                // .vertexBindingDescriptionCount = vertex_bindings_len,
+                // .pVertexBindingDescriptions = vertex_bindings,
+                // .vertexAttributeDescriptionCount = vertex_attributes_len,
+                // .pVertexAttributeDescriptions = vertex_attributes,
             },
             .pInputAssemblyState = &(const VkPipelineInputAssemblyStateCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -511,19 +508,20 @@ void record_buffer(const GameRenderer *const renderer, VkCommandBuffer buffer, u
         .offset = { .x = 0, .y = 0 },
         .extent = renderer->surface_capabilities.currentExtent,
     });
+    const M4 vp = m4mul(renderer->projection, renderer->view);
+    for (usize i = 0; i < renderer->render_objects.length; ++i) {
+        const RenderObject *object = (RenderObject *)ArrayList_get(renderer->render_objects, i);
+        const MeshData *meshdata = renderer->meshes+object->mesh;
+        vkCmdPushConstants(buffer, renderer->mesh_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &(const MeshPushConstants) {
+            .mvp = m4mul(vp, m4transform(object->transform)),
+        });
+        // vkCmdBindVertexBuffers(buffer, 0, 1, &meshdata->buffer, (VkDeviceSize []){0});
+        // vkCmdDraw(buffer, meshdata->draw_count, 1, 0, 0);
+    }
     vkCmdPushConstants(buffer, renderer->mesh_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &(const MeshPushConstants) {
-        .mvp = {
-            { 1.0f, 0.0f, 0.0f, 0.0f },
-            { 0.0f, 1.0f, 0.0f, 0.0f },
-            { 0.0f, 0.0f, 1.0f, 0.0f },
-            { 0.0f, 0.0f, 0.0f, 1.0f },
-        },
+        .mvp = vp,
     });
-    // for (usize i = 0; renderer->render_objects.length; ++i) {
-    //     const MeshData *meshdata = renderer->meshes+((RenderObject *)ArrayList_get(renderer->render_objects, i))->mesh;
-    //     vkCmdBindVertexBuffers(buffer, 0, 1, &meshdata->buffer, (VkDeviceSize []){0});
-    //     vkCmdDraw(buffer, meshdata->draw_count, 1, 0, 0);
-    // }
+    vkCmdDraw(buffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(buffer);
     vkCheck(vkEndCommandBuffer(buffer));
 }

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "defines.h"
-
 #define K(KEY) KEY_##KEY
 
 typedef enum Keys {
@@ -21,18 +19,11 @@ typedef struct Input {
     u8 keys_previous[KEYS_LENGTH];
 } Input;
 
-b32 input_pressed(Input const input, Keys const key);
-b32 input_released(Input const input, Keys const key);
-b32 input_just_pressed(Input const input, Keys const key);
-b32 input_just_released(Input const input, Keys const key);
-void input_prepare(Input *const input);
-
-#ifdef MAINFILE
-
-b32 input_pressed(Input const input, Keys const key) { return input.keys[key]; }
-b32 input_released(Input const input, Keys const key) { return !input.keys[key]; }
-b32 input_just_pressed(Input const input, Keys const key) { return input.keys[key] && !input.keys_previous[key]; }
-b32 input_just_released(Input const input, Keys const key) { return !input.keys[key] && input.keys_previous[key]; }
-void input_prepare(Input *const input) { for (usize i = 0; i < KEYS_LENGTH; ++i) input->keys_previous[i] = input->keys[i]; }
-
+#ifndef input_accessor
+#define input_accessor input.
 #endif
+#define input_pressed(key) input_accessor keys[key]
+#define input_released(key) !input_accessor keys[key]
+#define input_just_pressed(key) (input_accessor keys[key] && !input_accessor keys_previous[key])
+#define input_just_released(key) (!input_accessor keys[key] && input_accessor keys_previous[key])
+#define input_prepare() do { for (usize i = 0; i < KEYS_LENGTH; ++i) input_accessor keys_previous[i] = input_accessor keys[i]; } while (0)
