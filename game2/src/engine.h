@@ -1,5 +1,54 @@
 #pragma once
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <math.h>
+
+#define null ((void *)0)
+#define true 1
+#define false 0
+#define assert(check) do { if (!(check)) { fprintf(stderr, #check "\n"); abort(); } } while (0)
+#define pi32 3.141597f
+#define rad(d) (d*(pi32/180.0f))
+#define deg(r) (r*(180.0f/pi32))
+#define min(a, b) ((a) < (b) ? (a) : (b))
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define len(array) (sizeof(array)/sizeof((array)[0]))
+
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef uintptr_t usize;
+
+typedef int8_t i8;
+typedef int16_t i16;
+typedef int32_t i32;
+typedef int64_t i64;
+typedef intptr_t isize;
+
+typedef uint32_t b32;
+
+typedef float f32;
+typedef double f64;
+
+typedef struct ArrayList {
+    size_t size;
+    size_t length;
+    size_t capacity;
+    void *data;
+} ArrayList;
+
+#define ArrayList_init(type) { .size = sizeof(type), .length = 0, .capacity = 0, .data = NULL }
+#define ArrayList_resize(list, length) do { list.capacity = (length); list.data = realloc(list.data, list.size * list.capacity); } while (0)
+#define ArrayList_has_space(list) (list.capacity - list.length > 0)
+#define ArrayList_get(list, index) ((uint8_t *)(list.data)+(list.size * index))
+#define ArrayList_append(list, element_ptr) do { if (!ArrayList_has_space(list)) ArrayList_resize(list, list.capacity + 3); memcpy(ArrayList_get(list, list.length), element_ptr, list.size); ++list.length; } while (0)
+#define ArrayList_delete(list, index) do { memmove(ArrayList_get(list, index + 1), ArrayList_get(list, index), list.size * (list.length - 1 - index)); --list.length; } while (0)
+#define ArrayList_deinit(list) do { free(list.data); } while (0)
+
 typedef struct V2 { f32 x, y; } V2;
 typedef struct V3 { f32 x, y, z; } V3;
 typedef struct V4 { f32 x, y, z, w; } V4;
@@ -142,3 +191,35 @@ M4 m4transform(Transform transform)
 }
 
 #endif
+
+#define K(KEY) KEY_##KEY
+
+typedef enum Keys {
+    K(A), K(B), K(C), K(D), K(E), K(F), K(G), K(H), K(I), K(J), K(K), K(L), K(M), K(N), K(O), K(P), K(Q), K(R), K(S), K(T), K(U), K(V), K(W), K(X), K(Y), K(Z),
+    K(F1), K(F2), K(F3), K(F4), K(F5), K(F6), K(F7), K(F8), K(F9), K(F10), K(F11), K(F12),
+    K(LEFT_ARROW), K(DOWN_ARROW), K(UP_ARROW), K(RIGHT_ARROW),
+    K(BACKTICK), K(MINUS), K(EQUALS), K(PERIOD), K(COMMA), K(SLASH), K(BACKSLASH), K(SEMICOLON), K(APOSTROPHE), K(LEFT_BRACKET), K(RIGHT_BRACKET),
+    K(BACKSPACE), K(TAB), K(CAPS), K(SPACE), K(ESCAPE), K(RETURN), K(DELETE),
+    K(LEFT_CONTROL), K(LEFT_ALT), K(LEFT_SHIFT), K(RIGHT_CONTROL), K(RIGHT_ALT), K(RIGHT_SHIFT),
+    KEYS_LENGTH
+} Keys;
+
+#undef K
+
+typedef struct Input {
+    u8 keys[KEYS_LENGTH];
+    u8 keys_previous[KEYS_LENGTH];
+} Input;
+
+#ifndef input_accessor
+#define input_accessor input.
+#endif
+#define input_pressed(key) input_accessor keys[key]
+#define input_released(key) !input_accessor keys[key]
+#define input_just_pressed(key) (input_accessor keys[key] && !input_accessor keys_previous[key])
+#define input_just_released(key) (!input_accessor keys[key] && input_accessor keys_previous[key])
+#define input_prepare() do { for (usize i = 0; i < KEYS_LENGTH; ++i) input_accessor keys_previous[i] = input_accessor keys[i]; } while (0)
+
+#include "platform.h"
+#include "window.h"
+#include "renderer.h"
