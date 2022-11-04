@@ -10,7 +10,7 @@
 #define null ((void *)0)
 #define true 1
 #define false 0
-#define assert(check) do { if (!(check)) { fprintf(stderr, #check "\n"); abort(); } } while (0)
+#define assert(check) do { if (!(check)) { fprintf(stderr, __FILE__":%d: assert("#check")\n", __LINE__); abort(); } } while (0)
 #define pi32 3.141597f
 #define rad(d) (d*(pi32/180.0f))
 #define deg(r) (r*(180.0f/pi32))

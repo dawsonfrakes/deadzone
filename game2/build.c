@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <ctype.h>
 
 #include "src/platform.h"
 
@@ -23,7 +24,7 @@ typedef struct ComptimeFace {
     size_t texcoord_indices[3];
 } ComptimeFace;
 
-static ComptimeVertex *parse_obj(const char *filepath, size_t *len)
+static ComptimeVertex *parse_obj(const char *const filepath, size_t *len)
 {
     FILE *f = fopen(filepath, "r");
 
@@ -101,7 +102,8 @@ static void cmd(char **const result, const char *const fmt, ...)
         }
         pclose(f);
     } else {
-        system(s);
+        if (system(s) != 0)
+            exit(EXIT_FAILURE);
     }
 }
 
@@ -113,23 +115,31 @@ int main(void)
     const char *const outdir    = getenvorelse("OUTDIR", "./out");
     const char *const target    = getenvorelse("TARGET", "game");
     const char *const src       = getenvorelse("SRC", "src/emain.c");
+    const char *spvln           = getenvorelse("SPVLN", "spirv-link");
+    const char *spvcc           = getenvorelse("SPVCC", "glslc");
 
     // comptime generation
     {
-        const char *spvlinker = "spirv-link";
-        const char *spvcomp = "glslc";
         char comptimepath[2048] = {0};
         snprintf(comptimepath, sizeof(comptimepath), "%s/comptime.h", outdir);
         FILE *comptime = fopen(comptimepath, "w");
-        char *spvout;
-        cmd(&spvout, "%s <(%s shaders/mesh.vert -o -) <(%s shaders/mesh.frag -o -) -o - | xxd -i", spvlinker, spvcomp, spvcomp, outdir);
-        size_t num_cube_vertices;
-        ComptimeVertex *cube_vertices = parse_obj("meshes/cube.obj", &num_cube_vertices);
-        size_t num_triangle_vertices;
-        ComptimeVertex *triangle_vertices = parse_obj("meshes/triangle.obj", &num_triangle_vertices);
 
-        fputs("static const u8 meshspv[] = {\n", comptime);
-        fprintf(comptime, "%s};\n", spvout);
+        char *spvout;
+        cmd(&spvout, "%s <(%s shaders/mesh.vert -o -) <(%s shaders/mesh.frag -o -) -o - | xxd -i", spvln, spvcc, spvcc, outdir);
+        fprintf(comptime, "static const u8 meshspv[] = {\n%s};\n", spvout);
+        free(spvout);
+
+        char *meshes;
+        cmd(&meshes, "basename -s .obj -a meshes/*.obj");
+        fprintf(comptime, "enum Mesh {\n");
+
+        for (char *token = meshes; *token; ++token) {
+            fprintf(comptime, "\tMESH_");
+            while (*token && *token != '\n')
+                fprintf(comptime, "%c", toupper(*token++));
+            fprintf(comptime, ",\n");
+        }
+        fprintf(comptime, "\tMESH_LENGTH,\n};\n");
 
         fprintf(comptime,
             "typedef struct Vertex {\n"
@@ -174,47 +184,44 @@ int main(void)
             "    },\n"
             "};\n"
 #endif
-            "enum Mesh {\n"
-            "    MESH_CUBE,\n"
-            "    MESH_TRIANGLE,\n"
-            "    MESH_LENGTH,\n"
-            "};\n"
         );
 
-        fputs("static const Vertex cubemesh[] = {\n", comptime);
-        for (size_t i = 0; i < num_cube_vertices; ++i) {
-            fprintf(comptime,
-                "\t{\n\t\t.position = { .x = %f, .y = %f, .z = %f },\n\t\t.normal = { .x = %f, .y = %f, .z = %f }\n\t},\n",
-                cube_vertices[i].position.x, cube_vertices[i].position.y, cube_vertices[i].position.z,
-                cube_vertices[i].normal.x, cube_vertices[i].normal.y, cube_vertices[i].normal.z
-            );
-        }
-        fputs("};\n", comptime);
+        for (char *token = meshes; *token; ++token) {
+            char name[1024] = {0};
+            size_t cursor = 0;
+            while (*token && *token != '\n')
+                name[cursor++] = *token++;
 
-        fputs("static const Vertex trianglemesh[] = {\n", comptime);
-        for (size_t i = 0; i < num_triangle_vertices; ++i) {
-            fprintf(comptime,
-                "\t{\n\t\t.position = { .x = %f, .y = %f, .z = %f },\n\t\t.normal = { .x = %f, .y = %f, .z = %f }\n\t},\n",
-                triangle_vertices[i].position.x, triangle_vertices[i].position.y, triangle_vertices[i].position.z,
-                triangle_vertices[i].normal.x, triangle_vertices[i].normal.y, triangle_vertices[i].normal.z
-            );
+            char path[1024];
+            snprintf(path, sizeof(path), "meshes/%s.obj", name);
+
+            size_t num_vertices;
+            ComptimeVertex *vertices = parse_obj(path, &num_vertices);
+            fprintf(comptime, "static const Vertex %smesh[] = {\n", name);
+            for (size_t i = 0; i < num_vertices; ++i) {
+                fprintf(comptime,
+                    "\t{\n\t\t.position = { .x = %f, .y = %f, .z = %f },\n\t\t.normal = { .x = %f, .y = %f, .z = %f }\n\t},\n",
+                    vertices[i].position.x, vertices[i].position.y, vertices[i].position.z,
+                    vertices[i].normal.x, vertices[i].normal.y, vertices[i].normal.z
+                );
+            }
+            fputs("};\n", comptime);
+            free(vertices);
+
         }
-        fputs("};\n", comptime);
 
         fputs("static const VertexSlice meshes[MESH_LENGTH] = {\n", comptime);
-        for (size_t i = 0; i < 1/*MESH_LENGTH*/; ++i) {
-            fprintf(comptime,
-                "\t{\n\t\t.vertices = cubemesh,\n\t\t.len = len(cubemesh)\n\t},\n"
-            );
-            fprintf(comptime,
-                "\t{\n\t\t.vertices = trianglemesh,\n\t\t.len = len(trianglemesh)\n\t},\n"
-            );
+        for (char *token = meshes; *token; ++token) {
+            char name[1024] = {0};
+            size_t cursor = 0;
+            while (*token && *token != '\n')
+                name[cursor++] = *token++;
+
+            fprintf(comptime, "\t{\n\t\t.vertices = %smesh,\n\t\t.len = len(%smesh)\n\t},\n", name, name);
         }
         fputs("};\n", comptime);
 
-        free(triangle_vertices);
-        free(cube_vertices);
-        free(spvout);
+        free(meshes);
         fclose(comptime);
     }
 
