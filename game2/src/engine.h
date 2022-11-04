@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <float.h>
 
 #define null ((void *)0)
 #define true 1
@@ -77,6 +78,9 @@ typedef struct M4 {
 #define M4O { .m = { {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 0.0f} } }
 #define M4I { .m = { {1.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 0.0f, 1.0f} } }
 
+V3 v3mul(V3 a, f32 b);
+f32 v3len(V3 v);
+V3 v3norm(V3 v);
 M4 m4perspective(f32 fovy, f32 aspect, f32 znear, f32 zfar);
 M4 m4mul(M4 a, M4 b);
 V4 m4mulv4(M4 a, V4 b);
@@ -89,6 +93,27 @@ M4 m4scale(V3 s);
 M4 m4transform(Transform transform);
 
 #ifdef __main__
+
+V3 v3mul(V3 a, f32 b)
+{
+    V3 result;
+    result.x = a.x * b;
+    result.y = a.y * b;
+    result.z = a.z * b;
+    return result;
+}
+
+f32 v3len(V3 v)
+{
+    return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+V3 v3norm(V3 v)
+{
+    const f32 len = v3len(v);
+    if (fabsf(len) < FLT_EPSILON) return (V3) V3O;
+    return v3mul(v, 1.0f / len);
+}
 
 M4 m4perspective(f32 fovy, f32 aspect, f32 znear, f32 zfar)
 {

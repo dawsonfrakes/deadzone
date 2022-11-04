@@ -91,16 +91,18 @@ static void cmd(char **const result, const char *const fmt, ...)
     vsnprintf(s, sizeof(s), fmt, ap);
     va_end(ap);
     printf("build.c: %s\n", s);
-    FILE *f = popen(s, "r");
     if (result) {
+        FILE *f = popen(s, "r");
         *result = malloc(16384UL);
         (*result)[0] = 0;
         char line[1024];
         while (fgets(line, sizeof(line), f)) {
             strcat(*result, line);
         }
+        pclose(f);
+    } else {
+        system(s);
     }
-    pclose(f);
 }
 
 int main(void)
@@ -121,8 +123,10 @@ int main(void)
         FILE *comptime = fopen(comptimepath, "w");
         char *spvout;
         cmd(&spvout, "%s <(%s shaders/mesh.vert -o -) <(%s shaders/mesh.frag -o -) -o - | xxd -i", spvlinker, spvcomp, spvcomp, outdir);
-        size_t num_vertices;
-        ComptimeVertex *vertices = parse_obj("meshes/cube.obj", &num_vertices);
+        size_t num_cube_vertices;
+        ComptimeVertex *cube_vertices = parse_obj("meshes/cube.obj", &num_cube_vertices);
+        size_t num_triangle_vertices;
+        ComptimeVertex *triangle_vertices = parse_obj("meshes/triangle.obj", &num_triangle_vertices);
 
         fputs("static const u8 meshspv[] = {\n", comptime);
         fprintf(comptime, "%s};\n", spvout);
@@ -133,6 +137,10 @@ int main(void)
             "    V3 normal;\n"
             "    V2 texcoord;\n"
             "} Vertex;\n"
+            "typedef struct VertexSlice {\n"
+            "   const Vertex *vertices;\n"
+            "   usize len;\n"
+            "} VertexSlice;\n"
 #if RENDERING_API == RAPI_VULKAN
             "typedef struct MeshPushConstants {\n"
             "    M4 mvp;\n"
@@ -174,16 +182,38 @@ int main(void)
         );
 
         fputs("static const Vertex cubemesh[] = {\n", comptime);
-        for (size_t i = 0; i < num_vertices; ++i) {
+        for (size_t i = 0; i < num_cube_vertices; ++i) {
             fprintf(comptime,
                 "\t{\n\t\t.position = { .x = %f, .y = %f, .z = %f },\n\t\t.normal = { .x = %f, .y = %f, .z = %f }\n\t},\n",
-                vertices[i].position.x, vertices[i].position.y, vertices[i].position.z,
-                vertices[i].normal.x, vertices[i].normal.y, vertices[i].normal.z
+                cube_vertices[i].position.x, cube_vertices[i].position.y, cube_vertices[i].position.z,
+                cube_vertices[i].normal.x, cube_vertices[i].normal.y, cube_vertices[i].normal.z
             );
         }
-        fputs("};", comptime);
+        fputs("};\n", comptime);
 
-        free(vertices);
+        fputs("static const Vertex trianglemesh[] = {\n", comptime);
+        for (size_t i = 0; i < num_triangle_vertices; ++i) {
+            fprintf(comptime,
+                "\t{\n\t\t.position = { .x = %f, .y = %f, .z = %f },\n\t\t.normal = { .x = %f, .y = %f, .z = %f }\n\t},\n",
+                triangle_vertices[i].position.x, triangle_vertices[i].position.y, triangle_vertices[i].position.z,
+                triangle_vertices[i].normal.x, triangle_vertices[i].normal.y, triangle_vertices[i].normal.z
+            );
+        }
+        fputs("};\n", comptime);
+
+        fputs("static const VertexSlice meshes[MESH_LENGTH] = {\n", comptime);
+        for (size_t i = 0; i < 1/*MESH_LENGTH*/; ++i) {
+            fprintf(comptime,
+                "\t{\n\t\t.vertices = cubemesh,\n\t\t.len = len(cubemesh)\n\t},\n"
+            );
+            fprintf(comptime,
+                "\t{\n\t\t.vertices = trianglemesh,\n\t\t.len = len(trianglemesh)\n\t},\n"
+            );
+        }
+        fputs("};\n", comptime);
+
+        free(triangle_vertices);
+        free(cube_vertices);
         free(spvout);
         fclose(comptime);
     }

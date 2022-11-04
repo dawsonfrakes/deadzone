@@ -13,12 +13,16 @@
 
 #include "../out/comptime.h"
 
-typedef struct MeshData {
-    u16 draw_count;
-
+typedef struct Buffer {
 #if RENDERING_API == RAPI_VULKAN
     VkBuffer buffer;
+    VkDeviceMemory memory;
 #endif
+} Buffer;
+
+typedef struct MeshData {
+    Buffer buffer;
+    u32 draw_count;
 } MeshData;
 
 typedef struct RenderObject {
@@ -30,7 +34,7 @@ typedef struct GameRenderer {
     M4 projection;
     M4 view;
     ArrayList/*RenderObject*/ render_objects;
-    MeshData meshes[MESH_LENGTH]/* -> EnumArray(Mesh, MeshData) */;
+    MeshData gpumeshes[MESH_LENGTH]/* -> EnumArray(Mesh, MeshData) */;
 
 #if RENDERING_API == RAPI_VULKAN
     #define max_frames_rendering_at_once 2
@@ -74,6 +78,63 @@ static void renderer_deinit(const GameRenderer *const renderer);
 #if RENDERING_API == RAPI_VULKAN
 
 #define vkCheck(check) do { if ((check) != VK_SUCCESS) { fprintf(stderr, #check"\n"); abort(); } } while (0)
+
+static u32 find_mem_type(const GameRenderer *const renderer, u32 type_filter, VkMemoryPropertyFlags properties)
+{
+    for (u32 i = 0; i < renderer->physical_device_memory_properties.memoryTypeCount; ++i) {
+        if ((type_filter & (1 << i)) != 0 && (renderer->physical_device_memory_properties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+    assert(false);
+    return UINT32_MAX;
+}
+
+static Buffer buffer_create(const GameRenderer *const renderer, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties)
+{
+    Buffer result = {0};
+    vkCheck(vkCreateBuffer(renderer->device, &(const VkBufferCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    }, null, &result.buffer));
+    VkMemoryRequirements mem_req;
+    vkGetBufferMemoryRequirements(renderer->device, result.buffer, &mem_req);
+    vkCheck(vkAllocateMemory(renderer->device, &(const VkMemoryAllocateInfo) {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_req.size,
+        .memoryTypeIndex = find_mem_type(renderer, mem_req.memoryTypeBits, properties),
+    }, null, &result.memory));
+    vkCheck(vkBindBufferMemory(renderer->device, result.buffer, result.memory, 0));
+    return result;
+}
+
+static void buffer_destroy(const GameRenderer *const renderer, Buffer buffer)
+{
+    vkFreeMemory(renderer->device, buffer.memory, null);
+    vkDestroyBuffer(renderer->device, buffer.buffer, null);
+}
+
+static MeshData meshdata_create(const GameRenderer *const renderer, enum Mesh mesh)
+{
+    const VertexSlice vertex_slice = meshes[mesh];
+    const usize sizeof_vertices = sizeof(Vertex) * vertex_slice.len;
+    MeshData result;
+    result.draw_count = vertex_slice.len;
+    result.buffer = buffer_create(renderer, sizeof_vertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    void *data;
+    vkCheck(vkMapMemory(renderer->device, result.buffer.memory, 0, sizeof_vertices, 0, &data));
+    assert(data != null);
+        memcpy(data, vertex_slice.vertices, sizeof_vertices);
+    vkUnmapMemory(renderer->device, result.buffer.memory);
+    return result;
+}
+
+static void meshdata_destroy(const GameRenderer *const renderer, MeshData meshdata)
+{
+    buffer_destroy(renderer, meshdata.buffer);
+}
 
 static void swapchain_init(GameRenderer *const renderer)
 {
@@ -485,10 +546,10 @@ GameRenderer renderer_init(const GameWindow *const window)
             .pStages = stages,
             .pVertexInputState = &(const VkPipelineVertexInputStateCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                // .vertexBindingDescriptionCount = vertex_bindings_len,
-                // .pVertexBindingDescriptions = vertex_bindings,
-                // .vertexAttributeDescriptionCount = vertex_attributes_len,
-                // .pVertexAttributeDescriptions = vertex_attributes,
+                .vertexBindingDescriptionCount = len(vertex_bindings),
+                .pVertexBindingDescriptions = vertex_bindings,
+                .vertexAttributeDescriptionCount = len(vertex_attributes),
+                .pVertexAttributeDescriptions = vertex_attributes,
             },
             .pInputAssemblyState = &(const VkPipelineInputAssemblyStateCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -503,7 +564,7 @@ GameRenderer renderer_init(const GameWindow *const window)
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
                 .polygonMode = polygon_mode,
                 .cullMode = VK_CULL_MODE_BACK_BIT,
-                .frontFace = VK_FRONT_FACE_CLOCKWISE,
+                .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
                 .lineWidth = 1.0f,
             },
             .pMultisampleState = &(const VkPipelineMultisampleStateCreateInfo) {
@@ -533,12 +594,11 @@ GameRenderer renderer_init(const GameWindow *const window)
             .renderPass = result.render_pass,
             .subpass = 0,
         }, null, &result.mesh_graphics_pipeline));
-    }
+    };
 
-    // result.impl.mesh_to_gpudata_map = comptime std.EnumArray(Mesh, VulkanMesh).initUndefined();
-    // inline for (@typeInfo(Mesh).Enum.fields) |field| {
-    //     result.impl.mesh_to_gpudata_map.set(@field(Mesh, field.name), try VulkanMesh.create(&result.impl, comptime try parseObj(@field(Mesh, field.name))));
-    // }
+    for (usize i = 0; i < MESH_LENGTH; ++i) {
+        result.gpumeshes[i] = meshdata_create(&result, i);
+    }
 
     swapchain_init(&result);
 
@@ -582,17 +642,13 @@ static void record_buffer(const GameRenderer *const renderer, VkCommandBuffer bu
     const M4 vp = m4mul(renderer->projection, renderer->view);
     for (usize i = 0; i < renderer->render_objects.length; ++i) {
         const RenderObject *object = (RenderObject *)ArrayList_get(renderer->render_objects, i);
-        // const MeshData *meshdata = renderer->meshes+object->mesh;
+        const MeshData *meshdata = renderer->gpumeshes+object->mesh;
         vkCmdPushConstants(buffer, renderer->mesh_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &(const MeshPushConstants) {
             .mvp = m4mul(vp, m4transform(object->transform)),
         });
-        // vkCmdBindVertexBuffers(buffer, 0, 1, &meshdata->buffer, (VkDeviceSize []){0});
-        // vkCmdDraw(buffer, meshdata->draw_count, 1, 0, 0);
+        vkCmdBindVertexBuffers(buffer, 0, 1, &meshdata->buffer.buffer, (VkDeviceSize []){0});
+        vkCmdDraw(buffer, meshdata->draw_count, 1, 0, 0);
     }
-    vkCmdPushConstants(buffer, renderer->mesh_graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(MeshPushConstants), &(const MeshPushConstants) {
-        .mvp = vp,
-    });
-    vkCmdDraw(buffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(buffer);
     vkCheck(vkEndCommandBuffer(buffer));
 }
@@ -651,9 +707,9 @@ void renderer_deinit(const GameRenderer *const renderer)
 {
     swapchain_deinit(renderer);
     ArrayList_deinit(renderer->render_objects);
-    // inline for (@typeInfo(Mesh).Enum.fields) |field| {
-    //     self.impl.mesh_to_gpudata_map.get(@field(Mesh, field.name)).destroy();
-    // }
+    for (usize i = 0; i < MESH_LENGTH; ++i) {
+        meshdata_destroy(renderer, renderer->gpumeshes[i]);
+    }
     vkDestroyPipeline(renderer->device, renderer->mesh_graphics_pipeline, null);
     vkDestroyPipelineLayout(renderer->device, renderer->mesh_graphics_pipeline_layout, null);
     vkDestroyRenderPass(renderer->device, renderer->render_pass, null);
