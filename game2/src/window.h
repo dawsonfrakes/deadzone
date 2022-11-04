@@ -8,7 +8,7 @@
 #endif
 
 typedef struct GameWindow {
-    Input *input;
+    GameInput *input;
 
 #if WINDOWING_API == WAPI_WIN32
     HINSTANCE inst;
@@ -20,14 +20,14 @@ typedef struct GameWindow {
 #endif
 } GameWindow;
 
-static GameWindow window_init(Input *const input, const char *const title);
+static GameWindow window_init(GameInput *const input, const char *const title);
 static b32 window_update(GameWindow *const window);
 static void window_deinit(const GameWindow *const window);
 
 #ifdef __main__
 
 #if WINDOWING_API == WAPI_WIN32
-GameWindow window_init(Input *const input, const char *const title)
+GameWindow window_init(GameInput *const input, const char *const title)
 {
     GameWindow result = {0};
     result.input = input;
@@ -70,7 +70,7 @@ void window_deinit(const GameWindow *const window)
 {
 }
 #elif WINDOWING_API == WAPI_XLIB
-GameWindow window_init(Input *const input, const char *const title)
+GameWindow window_init(GameInput *const input, const char *const title)
 {
     GameWindow result = {0};
     result.input = input;

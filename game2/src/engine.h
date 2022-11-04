@@ -1,9 +1,11 @@
 #pragma once
 
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 #include <math.h>
 #include <float.h>
 
@@ -17,6 +19,9 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define len(array) (sizeof(array)/sizeof((array)[0]))
+#define ms_per_s (1000ULL)
+#define us_per_s (1000ULL * ms_per_s)
+#define ns_per_s (1000ULL * us_per_s)
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -219,7 +224,7 @@ M4 m4transform(Transform transform)
 
 #define K(KEY) KEY_##KEY
 
-typedef enum Keys {
+typedef enum GameKeys {
     K(A), K(B), K(C), K(D), K(E), K(F), K(G), K(H), K(I), K(J), K(K), K(L), K(M), K(N), K(O), K(P), K(Q), K(R), K(S), K(T), K(U), K(V), K(W), K(X), K(Y), K(Z),
     K(F1), K(F2), K(F3), K(F4), K(F5), K(F6), K(F7), K(F8), K(F9), K(F10), K(F11), K(F12),
     K(LEFT_ARROW), K(DOWN_ARROW), K(UP_ARROW), K(RIGHT_ARROW),
@@ -227,23 +232,31 @@ typedef enum Keys {
     K(BACKSPACE), K(TAB), K(CAPS), K(SPACE), K(ESCAPE), K(RETURN), K(DELETE),
     K(LEFT_CONTROL), K(LEFT_ALT), K(LEFT_SHIFT), K(RIGHT_CONTROL), K(RIGHT_ALT), K(RIGHT_SHIFT),
     KEYS_LENGTH
-} Keys;
+} GameKeys;
 
 #undef K
 
-typedef struct Input {
+typedef struct GameInput {
     u8 keys[KEYS_LENGTH];
     u8 keys_previous[KEYS_LENGTH];
-} Input;
+} GameInput;
 
-#ifndef input_accessor
-#define input_accessor input.
-#endif
-#define input_pressed(key) input_accessor keys[key]
-#define input_released(key) !input_accessor keys[key]
-#define input_just_pressed(key) (input_accessor keys[key] && !input_accessor keys_previous[key])
-#define input_just_released(key) (!input_accessor keys[key] && input_accessor keys_previous[key])
-#define input_prepare() do { for (usize i = 0; i < KEYS_LENGTH; ++i) input_accessor keys_previous[i] = input_accessor keys[i]; } while (0)
+#define input_pressed(input, key) (input).keys[key]
+#define input_released(input, key) !(input).keys[key]
+#define input_just_pressed(input, key) ((input).keys[key] && !(input).keys_previous[key])
+#define input_just_released(input, key) (!(input).keys[key] && (input).keys_previous[key])
+#define input_prepare(input) do { for (usize i = 0; i < KEYS_LENGTH; ++i) (input).keys_previous[i] = (input).keys[i]; } while (0)
+
+typedef struct GameTime {
+    f32 delta, running;
+    u64 _current;
+    u64 _start, _previous;
+} GameTime;
+
+#define time_get(outu64) do { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); (outu64) = (u64) (ts.tv_sec) * ns_per_s + (u64) ts.tv_nsec; } while (0)
+#define time_to_float(inu64) ((f32) (inu64) / ns_per_s)
+#define time_init(t) do { time_get((t)._start); (t)._previous = (t)._start; } while (0)
+#define time_update(t) do { time_get((t)._current); (t).delta = time_to_float((t)._current - (t)._previous); (t)._previous = (t)._current; (t).running = time_to_float((t)._current - (t)._start); } while (0)
 
 #include "platform.h"
 #include "window.h"
