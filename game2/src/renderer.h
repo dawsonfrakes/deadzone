@@ -20,6 +20,15 @@ typedef struct Buffer {
 #endif
 } Buffer;
 
+typedef struct Image {
+#if RENDERING_API == RAPI_VULKAN
+    VkImage image;
+    VkDeviceMemory memory;
+    VkImageView view;
+    VkFormat format;
+#endif
+} Image;
+
 typedef struct MeshData {
     Buffer buffer;
     u32 draw_count;
@@ -65,6 +74,7 @@ typedef struct GameRenderer {
     VkImage swapchain_images[max_swapchain_images];
     VkImageView swapchain_image_views[max_swapchain_images];
     VkFramebuffer framebuffers[max_swapchain_images];
+    Image depth_buffer;
     u32 current_frame;
 #endif
 } GameRenderer;
@@ -114,6 +124,52 @@ static void buffer_destroy(const GameRenderer *const renderer, Buffer buffer)
 {
     vkFreeMemory(renderer->device, buffer.memory, null);
     vkDestroyBuffer(renderer->device, buffer.buffer, null);
+}
+
+static Image image_create(const GameRenderer *const renderer, VkFormat format, VkImageUsageFlags usage, VkExtent3D extent, VkImageAspectFlags aspect_flags, VkMemoryPropertyFlags properties)
+{
+    Image result;
+    result.format = format;
+    vkCheck(vkCreateImage(renderer->device, &(const VkImageCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = result.format,
+        .extent = extent,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = usage,
+    }, null, &result.image));
+    VkMemoryRequirements mem_req;
+    vkGetImageMemoryRequirements(renderer->device, result.image, &mem_req);
+    vkCheck(vkAllocateMemory(renderer->device, &(const VkMemoryAllocateInfo) {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_req.size,
+        .memoryTypeIndex = find_mem_type(renderer, mem_req.memoryTypeBits, properties),
+    }, null, &result.memory));
+    vkCheck(vkBindImageMemory(renderer->device, result.image, result.memory, 0));
+    vkCheck(vkCreateImageView(renderer->device, &(const VkImageViewCreateInfo) {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .image = result.image,
+        .format = result.format,
+        .subresourceRange = {
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+            .aspectMask = aspect_flags,
+        },
+    }, null, &result.view));
+    return result;
+}
+
+static void image_destroy(const GameRenderer *const renderer, Image image)
+{
+    vkDestroyImageView(renderer->device, image.view, null);
+    vkFreeMemory(renderer->device, image.memory, null);
+    vkDestroyImage(renderer->device, image.image, null);
 }
 
 static MeshData meshdata_create(const GameRenderer *const renderer, enum Mesh mesh)
@@ -208,23 +264,23 @@ static void swapchain_init(GameRenderer *const renderer)
         }
     }
     // createDepthBuffer()
-    // {
-    //     self.impl.depth_buffer = try Image.create(&self.impl, c.VK_FORMAT_D32_SFLOAT, c.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, .{
-    //         .width = self.impl.surface_capabilities.currentExtent.width,
-    //         .height = self.impl.surface_capabilities.currentExtent.height,
-    //         .depth = 1,
-    //     }, c.VK_IMAGE_ASPECT_DEPTH_BIT, c.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    // }
+    {
+        renderer->depth_buffer = image_create(renderer, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, (const VkExtent3D) {
+            .width = renderer->surface_capabilities.currentExtent.width,
+            .height = renderer->surface_capabilities.currentExtent.height,
+            .depth = 1,
+        }, VK_IMAGE_ASPECT_DEPTH_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    }
     // createFramebuffers()
     {
         for (u32 i = 0; i < renderer->image_count; ++i) {
             vkCheck(vkCreateFramebuffer(renderer->device, &(const VkFramebufferCreateInfo) {
                 .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
                 .renderPass = renderer->render_pass,
-                .attachmentCount = 1,
+                .attachmentCount = 2,
                 .pAttachments = (const VkImageView []) {
                     renderer->swapchain_image_views[i],
-                    // renderer->depth_buffer.view,
+                    renderer->depth_buffer.view,
                 },
                 .width = renderer->surface_capabilities.currentExtent.width,
                 .height = renderer->surface_capabilities.currentExtent.height,
@@ -241,7 +297,7 @@ static void swapchain_deinit(const GameRenderer *const renderer)
         vkDestroyFramebuffer(renderer->device, renderer->framebuffers[i], null);
         vkDestroyImageView(renderer->device, renderer->swapchain_image_views[i], null);
     }
-    // renderer->depth_buffer.destroy();
+    image_destroy(renderer, renderer->depth_buffer);
     vkDestroySwapchainKHR(renderer->device, renderer->swapchain, null);
 }
 
@@ -441,7 +497,7 @@ GameRenderer renderer_init(const GameWindow *const window)
     {
         vkCheck(vkCreateRenderPass(result.device, &(const VkRenderPassCreateInfo) {
             .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-            .attachmentCount = 1,
+            .attachmentCount = 2,
             .pAttachments = (const VkAttachmentDescription []) {
                 {
                     .format = result.surface_format.format,
@@ -453,16 +509,16 @@ GameRenderer renderer_init(const GameWindow *const window)
                     .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
                     .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                 },
-                // {
-                //     .format = VK_FORMAT_D32_SFLOAT,
-                //     .samples = VK_SAMPLE_COUNT_1_BIT,
-                //     .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                //     .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-                //     .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-                //     .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                //     .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                //     .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                // },
+                {
+                    .format = VK_FORMAT_D32_SFLOAT,
+                    .samples = VK_SAMPLE_COUNT_1_BIT,
+                    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                    .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                    .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                    .finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                },
             },
             .subpassCount = 1,
             .pSubpasses = &(const VkSubpassDescription) {
@@ -472,12 +528,12 @@ GameRenderer renderer_init(const GameWindow *const window)
                     .attachment = 0,
                     .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 },
-                // .pDepthStencilAttachment = &(const VkAttachmentReference) {
-                //     .attachment = 1,
-                //     .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                // },
+                .pDepthStencilAttachment = &(const VkAttachmentReference) {
+                    .attachment = 1,
+                    .layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                },
             },
-            .dependencyCount = 1,
+            .dependencyCount = 2,
             .pDependencies = (const VkSubpassDependency []) {
                 {
                     .srcSubpass = VK_SUBPASS_EXTERNAL,
@@ -487,14 +543,14 @@ GameRenderer renderer_init(const GameWindow *const window)
                     .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                     .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                 },
-                // {
-                //     .srcSubpass = VK_SUBPASS_EXTERNAL,
-                //     .dstSubpass = 0,
-                //     .srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-                //     .srcAccessMask = 0,
-                //     .dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-                //     .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                // },
+                {
+                    .srcSubpass = VK_SUBPASS_EXTERNAL,
+                    .dstSubpass = 0,
+                    .srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                    .srcAccessMask = 0,
+                    .dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                    .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                },
             },
         }, null, &result.render_pass));
     }
@@ -620,10 +676,10 @@ static void record_buffer(const GameRenderer *const renderer, VkCommandBuffer bu
             .offset = { .x = 0, .y = 0 },
             .extent = renderer->surface_capabilities.currentExtent,
         },
-        .clearValueCount = 1,
+        .clearValueCount = 2,
         .pClearValues = (const VkClearValue []) {
             { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 1.0f } } },
-            // { .depthStencil = { .depth = 1.0f, .stencil = 0 } },
+            { .depthStencil = { .depth = 1.0f, .stencil = 0 } },
         },
     }, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer->mesh_graphics_pipeline);

@@ -2,7 +2,6 @@
 #include "engine.h"
 
 // REMAINING ELEMENTS OF PORT
-// Image Creation -> Depth Buffer
 // Time
 
 static usize my_obj_i;
@@ -52,7 +51,7 @@ int main(void)
     ArrayList_append(renderer.render_objects, (&(RenderObject) {
         .mesh = MESH_CUBE,
         .transform = {
-            .position = { 5.0, 0.0, 0.0 },
+            .position = { 0.0, 0.0, -5.0 },
             .scale = V3I
         }
     }));
