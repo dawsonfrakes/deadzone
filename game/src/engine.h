@@ -23,6 +23,9 @@
 #define ms_per_s (1000ULL)
 #define us_per_s (1000ULL * ms_per_s)
 #define ns_per_s (1000ULL * us_per_s)
+#define b_per_kb (1000ULL)
+#define b_per_mb (1000ULL * b_per_kb)
+#define b_per_gb (1000ULL * b_per_mb)
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -267,13 +270,15 @@ typedef struct GameTime {
 
 #include "dlfcn.h"
 
-#define GAME_INIT(NAME) void NAME(GameRenderer *const renderer)
-#define GAME_UPDATE(NAME) void NAME(b32 *reload, b32 *running, GameRenderer *const renderer, const GameInput input, const GameTime Time)
+struct MemoryMapping;
+
+#define GAME_INIT(NAME) void NAME(struct MemoryMapping *const memory, GameRenderer *const renderer)
+#define GAME_UPDATE(NAME) void NAME(void *const memory, b32 *reload, b32 *running, GameRenderer *const renderer, const GameInput input, const GameTime Time)
 #define GAME_RESIZE(NAME) void NAME(void)
 #define GAME_DEINIT(NAME) void NAME(void)
 
-static GAME_INIT(init_stub) { unused(renderer); }
-static GAME_UPDATE(update_stub) { unused(reload); unused(running); unused(renderer); unused(input); unused(Time); }
+static GAME_INIT(init_stub) { unused(memory); unused(renderer); }
+static GAME_UPDATE(update_stub) { unused(memory); unused(reload); unused(running); unused(renderer); unused(input); unused(Time); }
 static GAME_RESIZE(resize_stub) {}
 static GAME_DEINIT(deinit_stub) {}
 
@@ -299,7 +304,7 @@ static void load_game_functions(void)
     }
     gameso = dlopen("out/game.so", RTLD_LAZY);
     if (!gameso) {
-        fprintf(stderr, "failed to reopen dl\n");
+        fprintf(stderr, "out/game.so was not a valid game file\n");
         return;
     }
 

@@ -118,6 +118,8 @@ int main(void)
     const char *spvln           = getenvorelse("SPVLN", "spirv-link");
     const char *spvcc           = getenvorelse("SPVCC", "glslc");
 
+    cmd(NULL, "mkdir -p \"%s\"", outdir);
+
     // comptime generation
     {
         char comptimepath[2048] = {0};

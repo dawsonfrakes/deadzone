@@ -4,6 +4,8 @@
 int main(void)
 {
     // init subsystems
+    struct MemoryMapping *memory = calloc(b_per_gb, 1);
+    assert(memory);
     GameInput input = {0};
     GameWindow window = window_init(&input, "Hello, world!");
     GameRenderer renderer = renderer_init(&window);
@@ -11,7 +13,7 @@ int main(void)
 
     load_game_functions();
 
-    init(&renderer);
+    init(memory, &renderer);
 
     // loop until quit
     b32 running = true;
@@ -22,7 +24,7 @@ int main(void)
         if (!window_update(&window)) break;
         time_update(gtime);
             // update game
-            update(&reload, &running, &renderer, input, gtime);
+            update(memory, &reload, &running, &renderer, input, gtime);
             if (!running) break;
             if (reload) {
                 reload = false;
@@ -34,4 +36,5 @@ int main(void)
     // deinit subsystems
     renderer_deinit(&renderer);
     window_deinit(&window);
+    free(memory);
 }
