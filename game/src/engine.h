@@ -13,6 +13,7 @@
 #define true 1
 #define false 0
 #define assert(check) do { if (!(check)) { fprintf(stderr, __FILE__":%d: assert("#check")\n", __LINE__); abort(); } } while (0)
+#define unused(x) (void)(x)
 #define pi32 3.141597f
 #define rad(d) (d*(pi32/180.0f))
 #define deg(r) (r*(180.0f/pi32))
@@ -261,3 +262,57 @@ typedef struct GameTime {
 #include "platform.h"
 #include "window.h"
 #include "renderer.h"
+
+#ifdef __main__
+
+#include "dlfcn.h"
+
+#define GAME_INIT(NAME) void NAME(GameRenderer *const renderer)
+#define GAME_UPDATE(NAME) void NAME(b32 *reload, b32 *running, GameRenderer *const renderer, const GameInput input, const GameTime Time)
+#define GAME_RESIZE(NAME) void NAME(void)
+#define GAME_DEINIT(NAME) void NAME(void)
+
+static GAME_INIT(init_stub) { unused(renderer); }
+static GAME_UPDATE(update_stub) { unused(reload); unused(running); unused(renderer); unused(input); unused(Time); }
+static GAME_RESIZE(resize_stub) {}
+static GAME_DEINIT(deinit_stub) {}
+
+static GAME_INIT((*init)) = init_stub;
+static GAME_UPDATE((*update)) = update_stub;
+static GAME_RESIZE((*resize)) = resize_stub;
+static GAME_DEINIT((*deinit)) = deinit_stub;
+
+static void *gameso;
+
+static void clear_game_functions(void)
+{
+    init = init_stub;
+    update = update_stub;
+    resize = resize_stub;
+    deinit = deinit_stub;
+}
+
+static void load_game_functions(void)
+{
+    if (gameso) {
+        dlclose(gameso);
+    }
+    gameso = dlopen("out/game.so", RTLD_LAZY);
+    if (!gameso) {
+        fprintf(stderr, "failed to reopen dl\n");
+        return;
+    }
+
+    init = (GAME_INIT((*))) (usize) dlsym(gameso, "init");
+    update = (GAME_UPDATE((*))) (usize) dlsym(gameso, "update");
+    resize = (GAME_RESIZE((*))) (usize) dlsym(gameso, "resize");
+    deinit = (GAME_DEINIT((*))) (usize) dlsym(gameso, "deinit");
+}
+
+static void reload_game_functions(void)
+{
+    clear_game_functions();
+    load_game_functions();
+}
+
+#endif

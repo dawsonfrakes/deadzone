@@ -79,11 +79,11 @@ typedef struct GameRenderer {
 #endif
 } GameRenderer;
 
+#ifdef __main__
+
 static GameRenderer renderer_init(const GameWindow *const window);
 static void renderer_update(GameRenderer *const renderer);
 static void renderer_deinit(const GameRenderer *const renderer);
-
-#ifdef __main__
 
 #if RENDERING_API == RAPI_VULKAN
 

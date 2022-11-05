@@ -21,11 +21,11 @@ typedef struct GameWindow {
 #endif
 } GameWindow;
 
+#ifdef __main__
+
 static GameWindow window_init(GameInput *const input, const char *const title);
 static b32 window_update(GameWindow *const window);
 static void window_deinit(const GameWindow *const window);
-
-#ifdef __main__
 
 #if WINDOWING_API == WAPI_WIN32
 GameWindow window_init(GameInput *const input, const char *const title)
