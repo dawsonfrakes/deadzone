@@ -1,4 +1,4 @@
-// 2>/dev/null; tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT; cc $0 -o "$tmp" && "$tmp" $@; exit
+// 2>/dev/null; tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT; ${CC:-cc} $0 -o "$tmp" && "$tmp" $@; exit
 // example: sh build.c
 
 #include <stdio.h>
