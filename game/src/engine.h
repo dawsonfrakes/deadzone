@@ -101,7 +101,7 @@ M4 m4rotate(V3 r);
 M4 m4scale(V3 s);
 M4 m4transform(Transform transform);
 
-#ifdef __main__
+#if defined(__main__)
 
 V3 v3mul(V3 a, f32 b)
 {
@@ -249,7 +249,17 @@ typedef struct GameInput {
 #define input_released(input, key) !(input).keys[key]
 #define input_just_pressed(input, key) ((input).keys[key] && !(input).keys_previous[key])
 #define input_just_released(input, key) (!(input).keys[key] && (input).keys_previous[key])
-#define input_prepare(input) do { for (usize i = 0; i < KEYS_LENGTH; ++i) (input).keys_previous[i] = (input).keys[i]; } while (0)
+
+void input_prepare(GameInput *const input);
+
+#if defined(__main__)
+
+void input_prepare(GameInput *const input)
+{
+    memcpy(input->keys_previous, input->keys, sizeof(input->keys));
+}
+
+#endif
 
 typedef struct GameTime {
     f32 delta, running;
@@ -257,67 +267,39 @@ typedef struct GameTime {
     u64 _start, _previous;
 } GameTime;
 
-#define time_get(outu64) do { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); (outu64) = (u64) (ts.tv_sec) * ns_per_s + (u64) ts.tv_nsec; } while (0)
-#define time_to_float(inu64) ((f32) (inu64) / ns_per_s)
-#define time_init(t) do { time_get((t)._start); (t)._previous = (t)._start; } while (0)
-#define time_update(t) do { time_get((t)._current); (t).delta = time_to_float((t)._current - (t)._previous); (t)._previous = (t)._current; (t).running = time_to_float((t)._current - (t)._start); } while (0)
+u64 time_get(void);
+f32 time_to_float(const u64 t);
+GameTime time_init(void);
+void time_update(GameTime *const t);
 
-#include "platform.h"
-#include "window.h"
-#include "renderer.h"
+#if defined(__main__)
 
-#ifdef __main__
-
-#include "dlfcn.h"
-
-struct MemoryMapping;
-
-#define GAME_INIT(NAME) void NAME(struct MemoryMapping *const memory, GameRenderer *const renderer)
-#define GAME_UPDATE(NAME) void NAME(void *const memory, b32 *reload, b32 *running, GameRenderer *const renderer, const GameInput input, const GameTime Time)
-#define GAME_RESIZE(NAME) void NAME(void)
-#define GAME_DEINIT(NAME) void NAME(void)
-
-static GAME_INIT(init_stub) { unused(memory); unused(renderer); }
-static GAME_UPDATE(update_stub) { unused(memory); unused(reload); unused(running); unused(renderer); unused(input); unused(Time); }
-static GAME_RESIZE(resize_stub) {}
-static GAME_DEINIT(deinit_stub) {}
-
-static GAME_INIT((*init)) = init_stub;
-static GAME_UPDATE((*update)) = update_stub;
-static GAME_RESIZE((*resize)) = resize_stub;
-static GAME_DEINIT((*deinit)) = deinit_stub;
-
-static void *gameso;
-
-static void clear_game_functions(void)
+u64 time_get(void)
 {
-    init = init_stub;
-    update = update_stub;
-    resize = resize_stub;
-    deinit = deinit_stub;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (u64) (ts.tv_sec) * ns_per_s + (u64) ts.tv_nsec;
 }
 
-static void load_game_functions(void)
+f32 time_to_float(const u64 t)
 {
-    if (gameso) {
-        dlclose(gameso);
-    }
-    gameso = dlopen("out/game.so", RTLD_LAZY);
-    if (!gameso) {
-        fprintf(stderr, "out/game.so was not a valid game file\n");
-        return;
-    }
-
-    init = (GAME_INIT((*))) (usize) dlsym(gameso, "init");
-    update = (GAME_UPDATE((*))) (usize) dlsym(gameso, "update");
-    resize = (GAME_RESIZE((*))) (usize) dlsym(gameso, "resize");
-    deinit = (GAME_DEINIT((*))) (usize) dlsym(gameso, "deinit");
+    return (f32) t / ns_per_s;
 }
 
-static void reload_game_functions(void)
+GameTime time_init(void)
 {
-    clear_game_functions();
-    load_game_functions();
+    GameTime t;
+    t._start = t._previous = time_get();
+    return t;
+}
+
+void time_update(GameTime *const t)
+{
+    t->_current = time_get();
+    t->delta = time_to_float(t->_current - t->_previous);
+    t->_previous = t->_current;
+
+    t->running = time_to_float(t->_current - t->_start);
 }
 
 #endif

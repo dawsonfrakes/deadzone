@@ -109,14 +109,14 @@ static void cmd(char **const result, const char *const fmt, ...)
 
 int main(void)
 {
-    const char *const cc        = getenvorelse("CC", "zig cc");
-    const char *const cflags    = getenvorelse("CFLAGS", "-std=c99 -Wall -Wextra -pedantic -g");
-    const char *const ldflags   = getenvorelse("LDFLAGS", "-Wl,-E -lm -lvulkan -lX11 -ldl");
-    const char *const outdir    = getenvorelse("OUTDIR", "./out");
-    const char *const target    = getenvorelse("TARGET", "game");
-    const char *const src       = getenvorelse("SRC", "src/emain.c");
-    const char *spvln           = getenvorelse("SPVLN", "spirv-link");
-    const char *spvcc           = getenvorelse("SPVCC", "glslc");
+    const char *const cc      = getenvorelse("CC", "zig cc");
+    const char *const cflags  = getenvorelse("CFLAGS", "-std=c99 -Wall -Wextra -pedantic -g");
+    const char *const ldflags = getenvorelse("LDFLAGS", "-lm -lX11 -lvulkan");
+    const char *const outdir  = getenvorelse("OUTDIR", "./out");
+    const char *const target  = getenvorelse("TARGET", "game");
+    const char *const src     = getenvorelse("SRC", "src/emain.c");
+    const char *const spvln   = getenvorelse("SPVLN", "spirv-link");
+    const char *const spvcc   = getenvorelse("SPVCC", "glslc");
 
     cmd(NULL, "mkdir -p \"%s\"", outdir);
 
