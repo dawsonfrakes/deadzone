@@ -6,12 +6,6 @@ layout (location = 2) in vec2 a_texcoord;
 
 layout (location = 0) out vec3 f_color;
 
-vec3[] positions = {
-    vec3( 0.0,  1.0, 0.0),
-    vec3(-1.0, -1.0, 0.0),
-    vec3( 1.0, -1.0, 0.0),
-};
-
 layout (push_constant) uniform constants
 {
     mat4 mvp;
@@ -19,6 +13,6 @@ layout (push_constant) uniform constants
 
 void main()
 {
-    gl_Position = push.mvp * vec4(positions[gl_VertexIndex], 1.0);
+    gl_Position = push.mvp * vec4(a_position, 1.0);
     f_color = vec3(1.0, 0.0, 1.0);
 }

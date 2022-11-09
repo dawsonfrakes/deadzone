@@ -120,6 +120,8 @@ const Vulkan = struct {
     view: Matrix(4, 4, f32),
     projection: Matrix(4, 4, f32),
 
+    temp_mesh: Mesh,
+
     fn find_mem_type(self: Vulkan, type_filter: u32, properties: c.VkMemoryPropertyFlags) !u32 {
         const count = self.physical_device_memory_properties.memoryTypeCount;
         for (self.physical_device_memory_properties.memoryTypes[0..count]) |mem_type, i| {
@@ -129,6 +131,114 @@ const Vulkan = struct {
         }
         return error.MemoryTypeNotFound;
     }
+
+    const Vertex = struct {
+        position: @Vector(3, f32),
+        normal: @Vector(3, f32),
+        texcoord: @Vector(2, f32),
+    };
+
+    fn parseObj(comptime path: []const u8) []Vertex {
+        const obj = @embedFile(path);
+        @compileLog(obj);
+    }
+
+    const vertex_bindings = [_]c.VkVertexInputBindingDescription{
+        .{
+            .binding = 0,
+            .stride = @sizeOf(Vertex),
+            .inputRate = c.VK_VERTEX_INPUT_RATE_VERTEX,
+        },
+    };
+
+    const vertex_attributes = [_]c.VkVertexInputAttributeDescription{
+        .{
+            .location = 0,
+            .binding = 0,
+            .format = c.VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = @offsetOf(Vertex, "position"),
+        },
+        .{
+            .location = 1,
+            .binding = 0,
+            .format = c.VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = @offsetOf(Vertex, "normal"),
+        },
+        .{
+            .location = 2,
+            .binding = 0,
+            .format = c.VK_FORMAT_R32G32_SFLOAT,
+            .offset = @offsetOf(Vertex, "texcoord"),
+        },
+    };
+
+    const MeshPushConstants = struct {
+        mvp: Matrix(4, 4, f32),
+    };
+
+    const Mesh = struct {
+        draw_count: u32,
+        buffer: Buffer,
+
+        fn init(renderer: *const Vulkan) !Mesh {
+            const warped_cube = comptime parseObj("meshes/warped_cube.obj");
+            var result: Mesh = undefined;
+            result.draw_count = warped_cube.len;
+            const sizeof_vertices = @sizeOf(Vertex) * warped_cube.len;
+            result.buffer = try Buffer.init(renderer, sizeof_vertices, c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            var data: ?*anyopaque = undefined;
+            try vkCheck(c.vkMapMemory(renderer.device, result.buffer.memory, 0, sizeof_vertices, 0, &data));
+            std.debug.assert(data != null);
+            std.mem.copy(Vertex, @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), data.?))[0..warped_cube.len], &[_]Vertex{
+                zi(Vertex, .{
+                    .position = .{ 0.0, 1.0, 0.0 },
+                }),
+                zi(Vertex, .{
+                    .position = .{ -1.0, -1.0, 0.0 },
+                }),
+                zi(Vertex, .{
+                    .position = .{ 1.0, -1.0, 0.0 },
+                }),
+            });
+            c.vkUnmapMemory(renderer.device, result.buffer.memory);
+            return result;
+        }
+
+        fn deinit(self: Mesh) void {
+            self.buffer.deinit();
+        }
+    };
+
+    const Buffer = struct {
+        device: c.VkDevice,
+        memory: c.VkDeviceMemory,
+        buffer: c.VkBuffer,
+
+        fn init(renderer: *const Vulkan, size: c.VkDeviceSize, usage: c.VkBufferUsageFlags, properties: c.VkMemoryPropertyFlags) !Buffer {
+            var result: Buffer = undefined;
+            result.device = renderer.device;
+            try vkCheck(c.vkCreateBuffer(renderer.device, &zi(c.VkBufferCreateInfo, .{
+                .sType = c.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = size,
+                .usage = usage,
+                .sharingMode = c.VK_SHARING_MODE_EXCLUSIVE,
+            }), null, &result.buffer));
+            var mem_req: c.VkMemoryRequirements = undefined;
+            c.vkGetBufferMemoryRequirements(renderer.device, result.buffer, &mem_req);
+            try vkCheck(c.vkAllocateMemory(renderer.device, &zi(c.VkMemoryAllocateInfo, .{
+                .sType = c.VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .allocationSize = mem_req.size,
+                .memoryTypeIndex = try renderer.find_mem_type(mem_req.memoryTypeBits, properties),
+            }), null, &result.memory));
+            try vkCheck(c.vkBindBufferMemory(renderer.device, result.buffer, result.memory, 0));
+            return result;
+        }
+
+        fn deinit(self: Buffer) void {
+            c.vkFreeMemory(self.device, self.memory, null);
+            c.vkDestroyBuffer(self.device, self.buffer, null);
+        }
+    };
 
     const Image = struct {
         device: c.VkDevice,
@@ -441,10 +551,10 @@ const Vulkan = struct {
                 .pStages = &stages,
                 .pVertexInputState = &zi(c.VkPipelineVertexInputStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                    // .vertexBindingDescriptionCount = len(vertex_bindings),
-                    // .pVertexBindingDescriptions = vertex_bindings,
-                    // .vertexAttributeDescriptionCount = len(vertex_attributes),
-                    // .pVertexAttributeDescriptions = vertex_attributes,
+                    .vertexBindingDescriptionCount = vertex_bindings.len,
+                    .pVertexBindingDescriptions = &vertex_bindings,
+                    .vertexAttributeDescriptionCount = vertex_attributes.len,
+                    .pVertexAttributeDescriptions = &vertex_attributes,
                 }),
                 .pInputAssemblyState = &zi(c.VkPipelineInputAssemblyStateCreateInfo, .{
                     .sType = c.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -491,14 +601,12 @@ const Vulkan = struct {
             }), null, &result.mesh_graphics_pipeline));
         }
 
+        result.temp_mesh = try Mesh.init(&result);
+
         try result.swapchain_init();
 
         return result;
     }
-
-    const MeshPushConstants = struct {
-        mvp: Matrix(4, 4, f32),
-    };
 
     fn swapchain_init(result: *Vulkan) !void {
         try vkCheck(c.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(result.physical_device, result.surface, &result.surface_capabilities));
@@ -643,6 +751,7 @@ const Vulkan = struct {
 
     fn deinit(self: Vulkan) void {
         self.swapchain_deinit();
+        self.temp_mesh.deinit();
         c.vkDestroyPipeline(self.device, self.mesh_graphics_pipeline, null);
         c.vkDestroyPipelineLayout(self.device, self.mesh_graphics_pipeline_layout, null);
         c.vkDestroyRenderPass(self.device, self.render_pass, null);
@@ -694,7 +803,8 @@ const Vulkan = struct {
         //     c.vkCmdBindVertexBuffers(buffer, 0, 1, &meshdata->buffer.buffer, (c.VkDeviceSize []){0});
         //     c.vkCmdDraw(buffer, meshdata->draw_count, 1, 0, 0);
         // }
-        c.vkCmdDraw(buffer, 3, 1, 0, 0);
+        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.temp_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+        c.vkCmdDraw(buffer, self.temp_mesh.draw_count, 1, 0, 0);
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
     }
