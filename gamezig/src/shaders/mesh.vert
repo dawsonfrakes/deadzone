@@ -14,5 +14,5 @@ layout (push_constant) uniform constants
 void main()
 {
     gl_Position = push.mvp * vec4(a_position, 1.0);
-    f_color = vec3(1.0, 0.0, 1.0);
+    f_color = vec3(a_texcoord, 1.0);
 }

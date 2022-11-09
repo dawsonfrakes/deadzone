@@ -76,6 +76,43 @@ fn Matrix(
             }
             return self.mul(m);
         }
+
+        pub fn RotationX(angle: Element) Self {
+            var result = I();
+            const ca = @cos(angle);
+            const sa = @sin(angle);
+            result.data[1][1] = ca;
+            result.data[2][1] = sa;
+            result.data[1][2] = -sa;
+            result.data[2][2] = ca;
+            return result;
+        }
+
+        pub fn RotationY(angle: Element) Self {
+            var result = I();
+            const ca = @cos(angle);
+            const sa = @sin(angle);
+            result.data[0][0] = ca;
+            result.data[2][0] = sa;
+            result.data[0][2] = -sa;
+            result.data[2][2] = ca;
+            return result;
+        }
+
+        pub fn RotationZ(angle: Element) Self {
+            var result = I();
+            const ca = @cos(angle);
+            const sa = @sin(angle);
+            result.data[0][0] = ca;
+            result.data[1][0] = sa;
+            result.data[0][1] = -sa;
+            result.data[1][1] = ca;
+            return result;
+        }
+
+        pub fn rotate(self: Self, r: @Vector(3, Element)) Self {
+            return RotationZ(r[2]).mul(RotationX(r[0]).mul(RotationY(r[1]).mul(self)));
+        }
     };
 }
 
@@ -119,6 +156,7 @@ const Vulkan = struct {
     current_frame: u32,
     view: Matrix(4, 4, f32),
     projection: Matrix(4, 4, f32),
+    start: i128,
 
     temp_mesh: Mesh,
 
@@ -138,9 +176,89 @@ const Vulkan = struct {
         texcoord: @Vector(2, f32),
     };
 
-    fn parseObj(comptime path: []const u8) []Vertex {
+    fn parseObj(comptime path: []const u8) ![]Vertex {
+        @setEvalBranchQuota(100000);
         const obj = @embedFile(path);
-        @compileLog(obj);
+        const num_lines = std.mem.count(u8, obj, "\n");
+
+        var positions: [num_lines]@Vector(3, f32) = undefined;
+        var num_positions: usize = 0;
+
+        var normals: [num_lines]@Vector(3, f32) = undefined;
+        var num_normals: usize = 0;
+
+        var texcoords: [num_lines]@Vector(2, f32) = undefined;
+        var num_texcoords: usize = 0;
+
+        const Face = struct {
+            position_indices: [3]u16,
+            normal_indices: [3]u16,
+            texcoord_indices: [3]u16,
+        };
+
+        var faces: [num_lines]Face = undefined;
+        var num_faces: usize = 0;
+
+        var stream = std.io.fixedBufferStream(obj);
+        const reader = stream.reader();
+        var line_buf: [obj.len]u8 = undefined;
+        while (try reader.readUntilDelimiterOrEof(&line_buf, '\n')) |line| {
+            var tokens = std.mem.split(u8, line, " ");
+            _ = tokens.next();
+            switch (line[0]) {
+                'v' => {
+                    switch (line[1]) {
+                        ' ' => {
+                            positions[num_positions] = (@Vector(3, f32){
+                                try std.fmt.parseFloat(f32, tokens.next().?),
+                                try std.fmt.parseFloat(f32, tokens.next().?),
+                                try std.fmt.parseFloat(f32, tokens.next().?),
+                            });
+                            num_positions += 1;
+                        },
+                        'n' => {
+                            normals[num_normals] = (@Vector(3, f32){
+                                try std.fmt.parseFloat(f32, tokens.next().?),
+                                try std.fmt.parseFloat(f32, tokens.next().?),
+                                try std.fmt.parseFloat(f32, tokens.next().?),
+                            });
+                            num_normals += 1;
+                        },
+                        't' => {
+                            texcoords[num_texcoords] = (@Vector(2, f32){
+                                try std.fmt.parseFloat(f32, tokens.next().?),
+                                try std.fmt.parseFloat(f32, tokens.next().?),
+                            });
+                            num_texcoords += 1;
+                        },
+                        else => unreachable,
+                    }
+                },
+                'f' => {
+                    comptime var i = 0;
+                    inline while (i < 3) : (i += 1) {
+                        var inner_tokens = std.mem.split(u8, tokens.next().?, "/");
+                        faces[num_faces].position_indices[i] = try std.fmt.parseUnsigned(u16, inner_tokens.next().?, 10) - 1;
+                        faces[num_faces].normal_indices[i] = try std.fmt.parseUnsigned(u16, inner_tokens.next().?, 10) - 1;
+                        faces[num_faces].texcoord_indices[i] = try std.fmt.parseUnsigned(u16, inner_tokens.next().?, 10) - 1;
+                    }
+                    num_faces += 1;
+                },
+                else => {},
+            }
+        }
+        var result: [num_faces * 3]Vertex = undefined;
+        for (faces[0..num_faces]) |face, i| {
+            comptime var j = 0;
+            inline while (j < 3) : (j += 1) {
+                result[i * 3 + j] = .{
+                    .position = positions[face.position_indices[j]],
+                    .normal = normals[face.normal_indices[j]],
+                    .texcoord = texcoords[face.texcoord_indices[j]],
+                };
+            }
+        }
+        return &result;
     }
 
     const vertex_bindings = [_]c.VkVertexInputBindingDescription{
@@ -181,7 +299,7 @@ const Vulkan = struct {
         buffer: Buffer,
 
         fn init(renderer: *const Vulkan) !Mesh {
-            const warped_cube = comptime parseObj("meshes/warped_cube.obj");
+            const warped_cube = comptime try parseObj("meshes/warped_cube.obj");
             var result: Mesh = undefined;
             result.draw_count = warped_cube.len;
             const sizeof_vertices = @sizeOf(Vertex) * warped_cube.len;
@@ -189,17 +307,7 @@ const Vulkan = struct {
             var data: ?*anyopaque = undefined;
             try vkCheck(c.vkMapMemory(renderer.device, result.buffer.memory, 0, sizeof_vertices, 0, &data));
             std.debug.assert(data != null);
-            std.mem.copy(Vertex, @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), data.?))[0..warped_cube.len], &[_]Vertex{
-                zi(Vertex, .{
-                    .position = .{ 0.0, 1.0, 0.0 },
-                }),
-                zi(Vertex, .{
-                    .position = .{ -1.0, -1.0, 0.0 },
-                }),
-                zi(Vertex, .{
-                    .position = .{ 1.0, -1.0, 0.0 },
-                }),
-            });
+            std.mem.copy(Vertex, @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), data.?))[0..warped_cube.len], warped_cube);
             c.vkUnmapMemory(renderer.device, result.buffer.memory);
             return result;
         }
@@ -309,7 +417,8 @@ const Vulkan = struct {
     fn init(window: Window) !Vulkan {
         var result: Vulkan = undefined;
         result.current_frame = 0;
-        result.view = comptime Matrix(4, 4, f32).I().translate(.{ 0.0, 0.0, -2.0 });
+        result.view = comptime Matrix(4, 4, f32).I().translate(.{ 0.0, 0.0, -10.0 });
+        result.start = std.time.nanoTimestamp();
         // createInstance()
         {
             const instance_extensions = [_][*c]const u8{ c.VK_KHR_SURFACE_EXTENSION_NAME, c.VK_KHR_XLIB_SURFACE_EXTENSION_NAME };
@@ -742,6 +851,7 @@ const Vulkan = struct {
         std.heap.c_allocator.free(self.swapchain_image_views);
         self.depth_buffer.deinit();
         std.heap.c_allocator.free(self.swapchain_images);
+        c.vkDestroySwapchainKHR(self.device, self.swapchain, null);
     }
 
     fn swapchain_reinit(self: *Vulkan) !void {
@@ -793,7 +903,9 @@ const Vulkan = struct {
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.surface_capabilities.currentExtent,
         }));
-        const vp = self.projection.mul(self.view);
+        const r = @intToFloat(f32, self.start - std.time.nanoTimestamp()) / @intToFloat(f32, std.time.ns_per_s);
+        const model = Matrix(4, 4, f32).I().rotate(.{ 0.0, r, 0.0 });
+        const vp = self.projection.mul(self.view.mul(model));
         // for (usize i = 0; i < self.render_objects.length; ++i) {
         //     const RenderObject *object = (RenderObject *)ArrayList_get(self.render_objects, i);
         //     const MeshData *meshdata = self.gpumeshes+object->mesh;
@@ -884,7 +996,9 @@ const Xlib = struct {
     }
 
     fn deinit(self: Xlib) void {
-        _ = c.XCloseDisplay(self.dpy);
+        _ = c.XDestroyWindow(self.dpy, self.win);
+        // NOTE: XCloseDisplay seems to segfault with nvidia. I'm just avoiding it for now
+        // _ = c.XCloseDisplay(self.dpy);
     }
 
     fn update(self: *Xlib) ?void {

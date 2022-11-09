@@ -27,6 +27,7 @@ pub fn build(b: *std.build.Builder) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    _ = b.step("shaders", "Compile and Link SPIR-V binaries");
-    // spirv-link <(glslc src/shaders/mesh.vert -o -) <(glslc src/shaders/mesh.frag -o -) -o src/shaders/mesh.spv
+    const shaders_cmd = b.addSystemCommand(&[_][]const u8{ "/usr/bin/env", "bash", "-c", "spirv-link <(glslc src/shaders/mesh.vert -o -) <(glslc src/shaders/mesh.frag -o -) -o src/shaders/mesh.spv" });
+    const shaders_step = b.step("shaders", "Compile and Link SPIR-V binaries");
+    shaders_step.dependOn(&shaders_cmd.step);
 }
