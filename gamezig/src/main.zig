@@ -1,6 +1,85 @@
 const std = @import("std");
+const options = @import("options");
 const platform = @import("platform.zig");
 const c = @import("c.zig");
+
+const Time = struct {
+    delta: f64 = 0.0,
+    running: f64 = 0.0,
+    _start: i128 = 0,
+    _current: i128 = 0,
+    _previous: i128 = 0,
+
+    fn init() Time {
+        var result = Time{};
+        result._start = std.time.nanoTimestamp();
+        result._current = result._start;
+        result._previous = result._start;
+        return result;
+    }
+
+    fn toSeconds(time: i128) f64 {
+        return @intToFloat(f64, time) / std.time.ns_per_s;
+    }
+
+    fn tick(self: *Time) void {
+        self._current = std.time.nanoTimestamp();
+        self.delta = toSeconds(self._current - self._previous);
+        self.running = toSeconds(self._current - self._start);
+        self._previous = self._current;
+    }
+};
+
+const Input = struct {
+    // zig fmt: off
+    pub const Keys = enum {
+        a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z,
+        @"0",  @"1",  @"2",  @"3",  @"4",  @"5",  @"6",  @"7",  @"8",  @"9",
+        f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
+        left_arrow, down_arrow, up_arrow, right_arrow,
+        backtick, minus, equals, period, comma, slash, backslash, semicolon, apostrophe, left_bracket, right_bracket,
+        backspace, tab, caps, space, escape, @"return", delete,
+        left_control, left_alt, left_shift, right_control, right_alt, right_shift,
+    };
+    // zig fmt: on
+
+    keys: std.EnumArray(Keys, bool) = std.EnumArray(Keys, bool).initFill(false),
+    keys_previous: std.EnumArray(Keys, bool) = std.EnumArray(Keys, bool).initFill(false),
+
+    pub fn save(self: *Input) void {
+        self.keys_previous = self.keys;
+    }
+
+    pub fn setKey(self: *Input, key: Keys, value: bool) void {
+        self.keys.set(key, value);
+    }
+
+    pub fn getKeyDown(self: Input, key: Keys) bool {
+        return self.keys.get(key);
+    }
+
+    pub fn getKeyUp(self: Input, key: Keys) bool {
+        return !self.keys.get(key);
+    }
+
+    pub fn getKeyJustDown(self: Input, key: Keys) bool {
+        return self.keys.get(key) and !self.keys_previous.get(key);
+    }
+
+    pub fn getKeyJustUp(self: Input, key: Keys) bool {
+        return !self.keys.get(key) and self.keys_previous.get(key);
+    }
+};
+
+const Transform = struct {
+    position: @Vector(3, f32) = @splat(3, @as(f32, 0.0)),
+    rotation: @Vector(3, f32) = @splat(3, @as(f32, 0.0)),
+    scale: @Vector(3, f32) = @splat(3, @as(f32, 1.0)),
+
+    fn matrix(self: Transform) Matrix(4, 4, f32) {
+        return (comptime Matrix(4, 4, f32).I()).translate(self.position).rotate(self.rotation).scale(self.scale);
+    }
+};
 
 fn Matrix(
     comptime w: comptime_int,
@@ -111,7 +190,17 @@ fn Matrix(
         }
 
         pub fn rotate(self: Self, r: @Vector(3, Element)) Self {
-            return RotationZ(r[2]).mul(RotationX(r[0]).mul(RotationY(r[1]).mul(self)));
+            return self.mul(RotationZ(r[2])).mul(RotationX(r[0])).mul(RotationY(r[1]));
+        }
+
+        pub fn scale(self: Self, s: @Vector(3, Element)) Self {
+            comptime std.debug.assert(w == 4);
+            var m = comptime I();
+            comptime var i = 0;
+            inline while (i < 3) : (i += 1) {
+                m.data[i][i] = s[i];
+            }
+            return self.mul(m);
         }
     };
 }
@@ -156,9 +245,8 @@ const Vulkan = struct {
     current_frame: u32,
     view: Matrix(4, 4, f32),
     projection: Matrix(4, 4, f32),
-    start: i128,
-
-    temp_mesh: Mesh,
+    render_objects: std.ArrayList(RenderObject),
+    gpu_meshes: [options.files.len]Mesh,
 
     fn find_mem_type(self: Vulkan, type_filter: u32, properties: c.VkMemoryPropertyFlags) !u32 {
         const count = self.physical_device_memory_properties.memoryTypeCount;
@@ -298,8 +386,8 @@ const Vulkan = struct {
         draw_count: u32,
         buffer: Buffer,
 
-        fn init(renderer: *const Vulkan) !Mesh {
-            const warped_cube = comptime try parseObj("meshes/warped_cube.obj");
+        fn init(renderer: *const Vulkan, comptime file: []const u8) !Mesh {
+            const warped_cube = comptime try parseObj(options.files_folder ++ "/" ++ file ++ ".obj");
             var result: Mesh = undefined;
             result.draw_count = warped_cube.len;
             const sizeof_vertices = @sizeOf(Vertex) * warped_cube.len;
@@ -346,6 +434,28 @@ const Vulkan = struct {
             c.vkFreeMemory(self.device, self.memory, null);
             c.vkDestroyBuffer(self.device, self.buffer, null);
         }
+    };
+
+    const MeshSelector = @Type(.{ .Enum = .{
+        .layout = .Auto,
+        .tag_type = @Type(.{ .Int = .{
+            .signedness = .unsigned,
+            .bits = @ceil(@log2(@as(comptime_float, options.files.len))),
+        } }),
+        .fields = blk: {
+            var fields: [options.files.len]std.builtin.Type.EnumField = undefined;
+            for (options.files) |file, i| {
+                fields[i] = .{ .name = file, .value = i };
+            }
+            break :blk &fields;
+        },
+        .decls = &.{},
+        .is_exhaustive = true,
+    } });
+
+    const RenderObject = struct {
+        mesh: MeshSelector,
+        transform: Transform,
     };
 
     const Image = struct {
@@ -417,8 +527,6 @@ const Vulkan = struct {
     fn init(window: Window) !Vulkan {
         var result: Vulkan = undefined;
         result.current_frame = 0;
-        result.view = comptime Matrix(4, 4, f32).I().translate(.{ 0.0, 0.0, -10.0 });
-        result.start = std.time.nanoTimestamp();
         // createInstance()
         {
             const instance_extensions = [_][*c]const u8{ c.VK_KHR_SURFACE_EXTENSION_NAME, c.VK_KHR_XLIB_SURFACE_EXTENSION_NAME };
@@ -710,10 +818,12 @@ const Vulkan = struct {
             }), null, &result.mesh_graphics_pipeline));
         }
 
-        result.temp_mesh = try Mesh.init(&result);
+        inline for (options.files) |file, i| {
+            result.gpu_meshes[i] = try Mesh.init(&result, file);
+        }
 
         try result.swapchain_init();
-
+        // NOTE: don't put anything in between here unless you're special
         return result;
     }
 
@@ -861,7 +971,9 @@ const Vulkan = struct {
 
     fn deinit(self: Vulkan) void {
         self.swapchain_deinit();
-        self.temp_mesh.deinit();
+        for (self.gpu_meshes) |mesh| {
+            mesh.deinit();
+        }
         c.vkDestroyPipeline(self.device, self.mesh_graphics_pipeline, null);
         c.vkDestroyPipelineLayout(self.device, self.mesh_graphics_pipeline_layout, null);
         c.vkDestroyRenderPass(self.device, self.render_pass, null);
@@ -903,20 +1015,15 @@ const Vulkan = struct {
             .offset = .{ .x = 0, .y = 0 },
             .extent = self.surface_capabilities.currentExtent,
         }));
-        const r = @intToFloat(f32, self.start - std.time.nanoTimestamp()) / @intToFloat(f32, std.time.ns_per_s);
-        const model = Matrix(4, 4, f32).I().rotate(.{ 0.0, r, 0.0 });
-        const vp = self.projection.mul(self.view.mul(model));
-        // for (usize i = 0; i < self.render_objects.length; ++i) {
-        //     const RenderObject *object = (RenderObject *)ArrayList_get(self.render_objects, i);
-        //     const MeshData *meshdata = self.gpumeshes+object->mesh;
-        c.vkCmdPushConstants(buffer, self.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-            .mvp = vp, //.mul(object.transform),
-        }));
-        //     c.vkCmdBindVertexBuffers(buffer, 0, 1, &meshdata->buffer.buffer, (c.VkDeviceSize []){0});
-        //     c.vkCmdDraw(buffer, meshdata->draw_count, 1, 0, 0);
-        // }
-        c.vkCmdBindVertexBuffers(buffer, 0, 1, &self.temp_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
-        c.vkCmdDraw(buffer, self.temp_mesh.draw_count, 1, 0, 0);
+        const vp = self.projection.mul(self.view);
+        for (self.render_objects.items) |object| {
+            c.vkCmdPushConstants(buffer, self.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
+                .mvp = vp.mul(object.transform.matrix()),
+            }));
+            const gpu_mesh = self.gpu_meshes[@enumToInt(object.mesh)];
+            c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpu_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+            c.vkCmdDraw(buffer, gpu_mesh.draw_count, 1, 0, 0);
+        }
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
     }
@@ -969,6 +1076,7 @@ const Xlib = struct {
     fn init(args: struct { title: [:0]const u8 = "Title" }) !Xlib {
         var result: Xlib = undefined;
         result.dpy = c.XOpenDisplay(null) orelse return error.OpenDisplayFailure;
+        _ = c.XAutoRepeatOff(result.dpy);
         const scr = c.XDefaultScreen(result.dpy);
         const root = c.XRootWindow(result.dpy, scr);
         var attrs = std.mem.zeroInit(c.XSetWindowAttributes, .{
@@ -996,12 +1104,25 @@ const Xlib = struct {
     }
 
     fn deinit(self: Xlib) void {
+        _ = c.XAutoRepeatOn(self.dpy);
+        _ = c.XSync(self.dpy, c.False);
         _ = c.XDestroyWindow(self.dpy, self.win);
         // NOTE: XCloseDisplay seems to segfault with nvidia. I'm just avoiding it for now
         // _ = c.XCloseDisplay(self.dpy);
     }
 
-    fn update(self: *Xlib) ?void {
+    // zig fmt: off
+    const key_lookup = std.enums.directEnumArray(Input.Keys, u16, 0, .{
+        .a = c.XK_a, .b = c.XK_b, .c = c.XK_c, .d = c.XK_d, .e = c.XK_e, .f = c.XK_f, .g = c.XK_g, .h = c.XK_h, .i = c.XK_i, .j = c.XK_j, .k = c.XK_k, .l = c.XK_l, .m = c.XK_m, .n = c.XK_n, .o = c.XK_o, .p = c.XK_p, .q = c.XK_q, .r = c.XK_r, .s = c.XK_s, .t = c.XK_t, .u = c.XK_u, .v = c.XK_v, .w = c.XK_w, .x = c.XK_x, .y = c.XK_y, .z = c.XK_z,
+        .@"0" = c.XK_0, .@"1" = c.XK_1, .@"2" = c.XK_2, .@"3" = c.XK_3, .@"4" = c.XK_4, .@"5" = c.XK_5, .@"6" = c.XK_6, .@"7" = c.XK_7, .@"8" = c.XK_8, .@"9" = c.XK_9,
+        .f1 = c.XK_F1, .f2 = c.XK_F2, .f3 = c.XK_F3, .f4 = c.XK_F4, .f5 = c.XK_F5, .f6 = c.XK_F6, .f7 = c.XK_F7, .f8 = c.XK_F8, .f9 = c.XK_F9, .f10 = c.XK_F10, .f11 = c.XK_F11, .f12 = c.XK_F12,
+        .left_arrow = c.XK_Left, .down_arrow = c.XK_Down, .up_arrow = c.XK_Up, .right_arrow = c.XK_Right,
+        .backtick = c.XK_grave, .minus = c.XK_minus, .equals = c.XK_equal, .period = c.XK_period, .comma = c.XK_comma, .slash = c.XK_slash, .backslash = c.XK_backslash, .semicolon = c.XK_semicolon, .apostrophe = c.XK_apostrophe, .left_bracket = c.XK_bracketleft, .right_bracket = c.XK_bracketright,
+        .backspace = c.XK_BackSpace, .tab = c.XK_Tab, .caps = c.XK_Caps_Lock, .space = c.XK_space, .escape = c.XK_Escape, .@"return" = c.XK_Return, .delete = c.XK_Delete,
+        .left_control = c.XK_Control_L, .left_alt = c.XK_Alt_L, .left_shift = c.XK_Shift_L, .right_control = c.XK_Control_R, .right_alt = c.XK_Alt_R, .right_shift = c.XK_Shift_R,
+    });
+    // zig fmt: on
+    fn update(self: *Xlib, input: *Input) ?void {
         while (c.XPending(self.dpy) > 0) {
             var ev: c.XEvent = undefined;
             _ = c.XNextEvent(self.dpy, &ev);
@@ -1009,10 +1130,13 @@ const Xlib = struct {
                 c.KeyPress, c.KeyRelease => {
                     const sym = c.XLookupKeysym(&ev.xkey, 0);
                     const pressed = ev.type == c.KeyPress;
-                    if (sym == c.XK_Escape and pressed) {
-                        return null;
+                    var i: usize = 0;
+                    while (i < key_lookup.len) : (i += 1) {
+                        if (key_lookup[i] == sym)
+                            input.setKey(@intToEnum(Input.Keys, i), pressed);
                     }
                 },
+                c.MappingNotify => _ = c.XRefreshKeyboardMapping(&ev.xmapping),
                 c.ClientMessage => if (ev.xclient.data.l[0] == @intCast(c_long, self.wm_close)) return null,
                 c.DestroyNotify => return null,
                 else => {},
@@ -1021,14 +1145,109 @@ const Xlib = struct {
     }
 };
 
+const Win32 = struct {
+    const user32 = std.os.windows.user32;
+
+    inst: c.HINSTANCE,
+    hwnd: c.HWND,
+
+    fn init(args: struct { title: [:0]const u8 = "Title" }) !Win32 {
+        var result: Win32 = undefined;
+        result.inst = c.GetModuleHandle(null);
+        user32.registerClassExA(.{
+            .style = user32.CS_OWNDC | user32.CS_VREDRAW | user32.CS_HREDRAW,
+            .lpfnWndProc = user32.DefWindowProcA,
+            .hInstance = result.inst,
+            .hIcon = null,
+            .hCursor = null,
+            .hbrBackground = null,
+            .lpszMenuName = null,
+            .lpszClassName = "MUH_CLASS",
+            .hIconSm = null,
+        });
+        result.hwnd = user32.createWindowExA(
+            0,
+            "MUH_CLASS",
+            args.title,
+            user32.WS_OVERLAPPEDWINDOW | user32.WS_VISIBLE,
+            user32.CW_USEDEFAULT,
+            user32.CW_USEDEFAULT,
+            user32.CW_USEDEFAULT,
+            user32.CW_USEDEFAULT,
+            null,
+            null,
+            result.inst,
+            null,
+        );
+        return result;
+    }
+
+    fn deinit(self: Win32) void {
+        _ = self;
+    }
+
+    fn update(self: *Win32, input: *Input) ?void {
+        _ = .{ self, input };
+        var msg: user32.MSG = undefined;
+        while (try user32.peekMessageA(&msg, null, 0, 0, user32.PM_REMOVE)) {
+            user32.translateMessage(&msg);
+            user32.dispatchMessageA(&msg);
+        }
+    }
+};
+
 pub fn main() !void {
+    var input = Input{};
+    var time = Time.init();
     var window = try Window.init(.{});
     defer window.deinit();
     var renderer = try Renderer.init(window);
     defer renderer.deinit();
 
+    var view = Transform{};
+    view.position[2] = -10.0;
+
     while (true) {
-        window.update() orelse break;
+        window.update(&input) orelse break;
+        time.tick();
+
+        // gameUpdate()
+        if (input.getKeyJustDown(.escape)) {
+            break;
+        }
+        var direction = @splat(3, @as(f32, 0.0));
+        if (input.getKeyDown(.w)) {
+            direction[2] -= 1.0;
+        }
+        if (input.getKeyDown(.s)) {
+            direction[2] += 1.0;
+        }
+        if (input.getKeyDown(.d)) {
+            direction[0] += 1.0;
+        }
+        if (input.getKeyDown(.a)) {
+            direction[0] -= 1.0;
+        }
+        const direction_len = @sqrt(@reduce(.Add, direction * direction));
+        direction = if (std.math.approxEqAbs(f32, direction_len, 0.0, std.math.floatEps(f32)))
+            @splat(3, @as(f32, 0.0))
+        else
+            direction / @splat(3, direction_len);
+        const speed = 5.0;
+        view.position -= direction * @splat(3, @floatCast(f32, time.delta) * speed);
+
+        renderer.render_objects = std.ArrayList(Renderer.RenderObject).init(std.heap.c_allocator);
+        defer renderer.render_objects.deinit();
+        try renderer.render_objects.append(.{
+            .mesh = if (@floatToInt(u64, time.running) % 2 == 0) .cube1 else .warped_cube,
+            .transform = Transform{
+                // .position = .{ @floatCast(f32, @sin(time.running)) * 5.0, 0.0, 0.0 },
+                .rotation = @splat(3, @floatCast(f32, time.running)),
+            },
+        });
+        renderer.view = view.matrix();
+
         try renderer.update();
+        input.save();
     }
 }

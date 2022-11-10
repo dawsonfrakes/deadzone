@@ -1,11 +1,28 @@
 const std = @import("std");
 const platform = @import("src/platform.zig");
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.build.Builder) !void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
+    var files = std.ArrayList([]const u8).init(b.allocator);
+    defer files.deinit();
+    var options = b.addOptions();
+
+    var dir = try std.fs.cwd().openIterableDir("src/meshes", .{});
+    defer dir.close();
+    var it = dir.iterate();
+    while (try it.next()) |file| {
+        if (file.kind != .File)
+            continue;
+
+        try files.append(b.dupe(file.name[0 .. std.mem.indexOf(u8, file.name, ".") orelse unreachable]));
+    }
+    options.addOption([]const u8, "files_folder", "meshes");
+    options.addOption([]const []const u8, "files", files.items);
+
     const exe = b.addExecutable("game", "src/main.zig");
+    exe.addOptions("options", options);
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.linkLibC();
