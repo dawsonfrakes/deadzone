@@ -205,7 +205,9 @@ fn Matrix(
     };
 }
 
-const Renderer = Vulkan;
+const Renderer = switch (platform.Rendering) {
+    .vulkan => Vulkan,
+};
 
 const Vulkan = struct {
     const zi = std.mem.zeroInit;
@@ -529,7 +531,10 @@ const Vulkan = struct {
         result.current_frame = 0;
         // createInstance()
         {
-            const instance_extensions = [_][*c]const u8{ c.VK_KHR_SURFACE_EXTENSION_NAME, c.VK_KHR_XLIB_SURFACE_EXTENSION_NAME };
+            const instance_extensions = [_][*c]const u8{ c.VK_KHR_SURFACE_EXTENSION_NAME, switch (platform.Windowing) {
+                .xlib => c.VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+                .win32 => c.VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+            } };
             try vkCheck(c.vkCreateInstance(&zi(c.VkInstanceCreateInfo, .{
                 .sType = c.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
                 .enabledLayerCount = 1,
@@ -1066,7 +1071,10 @@ const Vulkan = struct {
     }
 };
 
-const Window = Xlib;
+const Window = switch (platform.Windowing) {
+    .xlib => Xlib,
+    .win32 => Win32,
+};
 
 const Xlib = struct {
     dpy: *c.Display,
@@ -1153,11 +1161,11 @@ const Win32 = struct {
 
     fn init(args: struct { title: [:0]const u8 = "Title" }) !Win32 {
         var result: Win32 = undefined;
-        result.inst = c.GetModuleHandle(null);
-        user32.registerClassExA(.{
+        result.inst = c.GetModuleHandleA(null);
+        _ = try user32.registerClassExA(&.{
             .style = user32.CS_OWNDC | user32.CS_VREDRAW | user32.CS_HREDRAW,
             .lpfnWndProc = user32.DefWindowProcA,
-            .hInstance = result.inst,
+            .hInstance = @ptrCast(std.os.windows.HINSTANCE, result.inst),
             .hIcon = null,
             .hCursor = null,
             .hbrBackground = null,
@@ -1165,10 +1173,10 @@ const Win32 = struct {
             .lpszClassName = "MUH_CLASS",
             .hIconSm = null,
         });
-        result.hwnd = user32.createWindowExA(
+        result.hwnd = c.CreateWindowExA(
             0,
             "MUH_CLASS",
-            args.title,
+            args.title.ptr,
             user32.WS_OVERLAPPEDWINDOW | user32.WS_VISIBLE,
             user32.CW_USEDEFAULT,
             user32.CW_USEDEFAULT,
@@ -1189,9 +1197,9 @@ const Win32 = struct {
     fn update(self: *Win32, input: *Input) ?void {
         _ = .{ self, input };
         var msg: user32.MSG = undefined;
-        while (try user32.peekMessageA(&msg, null, 0, 0, user32.PM_REMOVE)) {
-            user32.translateMessage(&msg);
-            user32.dispatchMessageA(&msg);
+        while (user32.peekMessageA(&msg, null, 0, 0, user32.PM_REMOVE) catch return null) {
+            _ = user32.translateMessage(&msg);
+            _ = user32.dispatchMessageA(&msg);
         }
     }
 };

@@ -31,7 +31,15 @@ pub fn build(b: *std.build.Builder) !void {
         .win32 => {},
     }
     switch (platform.Rendering) {
-        .vulkan => exe.linkSystemLibrary("vulkan"),
+        .vulkan => switch (platform.Windowing) {
+            .xlib => exe.linkSystemLibrary("vulkan"),
+            .win32 => {
+                // TODO: replace hardcoded paths with env:VULKAN_SDK
+                exe.addIncludePath("C:/VulkanSDK/1.3.231.1/Include");
+                exe.addLibraryPath("C:/VulkanSDK/1.3.231.1/Lib");
+                exe.linkSystemLibrary("vulkan-1");
+            },
+        },
     }
     exe.install();
 
@@ -44,6 +52,7 @@ pub fn build(b: *std.build.Builder) !void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    // NOTE: shader step only works on unix-like systems (currently?)
     const shaders_cmd = b.addSystemCommand(&[_][]const u8{ "/usr/bin/env", "bash", "-c", "spirv-link <(glslc src/shaders/mesh.vert -o -) <(glslc src/shaders/mesh.frag -o -) -o src/shaders/mesh.spv" });
     const shaders_step = b.step("shaders", "Compile and Link SPIR-V binaries");
     shaders_step.dependOn(&shaders_cmd.step);
