@@ -123,7 +123,9 @@ fn Matrix(
         data: [w]@Vector(h, Element),
 
         fn O() Self {
-            return comptime std.mem.zeroes(Self);
+            return .{
+                .data = [_]@Vector(h, Element){@splat(h, @as(Element, 0))} ** w,
+            };
         }
 
         fn I() Self {
@@ -151,7 +153,7 @@ fn Matrix(
         }
 
         fn mulv(self: Self, other: @Vector(w, Element)) @Vector(w, Element) {
-            var result = comptime std.mem.zeroes(@Vector(h, Element));
+            var result = @splat(h, @as(Element, 0));
             comptime var i = 0;
             inline while (i < w) : (i += 1) {
                 comptime var j = 0;
