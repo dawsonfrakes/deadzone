@@ -376,20 +376,25 @@ const Vulkan = struct {
                 else => {},
             }
         }
-        var result: [num_faces * 3]Vertex = undefined;
+
+        var vertices: [num_faces * 3]Vertex = undefined;
+        var num_vertices: usize = 0;
+        var indices: [num_faces * 3]u16 = undefined;
         for (faces[0..num_faces]) |face, i| {
             comptime var j = 0;
             inline while (j < 3) : (j += 1) {
-                result[i * 3 + j] = .{
+                vertices[num_vertices] = .{
                     .position = positions[face.position_indices[j]],
                     .normal = normals[face.normal_indices[j]],
                     .texcoord = texcoords[face.texcoord_indices[j]],
                 };
+                defer num_vertices += 1;
+                indices[i * 3 + j] = num_vertices;
             }
         }
         return .{
-            .vertices = &result,
-            .indices = &.{},
+            .vertices = &vertices,
+            .indices = &indices,
         };
     }
 
@@ -429,12 +434,12 @@ const Vulkan = struct {
     const Mesh = struct {
         draw_count: u16,
         vbo: Buffer,
-        // ibo: Buffer,
+        ibo: Buffer,
 
         fn init(renderer: *const Vulkan, comptime file: []const u8) !Mesh {
             const obj = comptime try parseObj(options.files_folder ++ "/" ++ file ++ ".obj");
             var result: Mesh = undefined;
-            result.draw_count = obj.vertices.len; //obj.indices.len;
+            result.draw_count = obj.indices.len;
 
             var data: ?*anyopaque = undefined;
             // vbo
@@ -446,17 +451,17 @@ const Vulkan = struct {
             c.vkUnmapMemory(renderer.device, result.vbo.memory);
 
             // ibo
-            // const sizeof_indices = @sizeOf(u16) * obj.indices.len;
-            // result.ibo = try Buffer.init(renderer, sizeof_indices, c.VK_BUFFER_USAGE_INDEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-            // try vkCheck(c.vkMapMemory(renderer.device, result.ibo.memory, 0, sizeof_indices, 0, &data));
-            // std.debug.assert(data != null);
-            // std.mem.copy(u16, @ptrCast([*]u16, @alignCast(@alignOf(u16), data.?))[0..obj.indices.len], obj.indices);
-            // c.vkUnmapMemory(renderer.device, result.ibo.memory);
+            const sizeof_indices = @sizeOf(u16) * obj.indices.len;
+            result.ibo = try Buffer.init(renderer, sizeof_indices, c.VK_BUFFER_USAGE_INDEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            try vkCheck(c.vkMapMemory(renderer.device, result.ibo.memory, 0, sizeof_indices, 0, &data));
+            std.debug.assert(data != null);
+            std.mem.copy(u16, @ptrCast([*]u16, @alignCast(@alignOf(u16), data.?))[0..obj.indices.len], obj.indices);
+            c.vkUnmapMemory(renderer.device, result.ibo.memory);
             return result;
         }
 
         fn deinit(self: Mesh) void {
-            // self.ibo.deinit();
+            self.ibo.deinit();
             self.vbo.deinit();
         }
     };
@@ -1079,7 +1084,8 @@ const Vulkan = struct {
             }));
             const gpu_mesh = self.gpu_meshes[@enumToInt(object.mesh)];
             c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpu_mesh.vbo.buffer, &[_]c.VkDeviceSize{0});
-            c.vkCmdDraw(buffer, gpu_mesh.draw_count, 1, 0, 0);
+            c.vkCmdBindIndexBuffer(buffer, gpu_mesh.ibo.buffer, 0, c.VK_INDEX_TYPE_UINT16);
+            c.vkCmdDrawIndexed(buffer, gpu_mesh.draw_count, 1, 0, 0, 0);
         }
         c.vkCmdEndRenderPass(buffer);
         try vkCheck(c.vkEndCommandBuffer(buffer));
