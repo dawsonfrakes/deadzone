@@ -165,6 +165,7 @@ fn Matrix(
         }
 
         fn perspective(fovy: Element, aspect: Element, znear: Element, zfar: Element) Self {
+            comptime std.debug.assert(w == 4);
             const focal_length = @as(Element, 1) / @tan(fovy / @as(Element, 2));
             var result = O();
             // map x coordinates to clip-space
@@ -299,7 +300,12 @@ const Vulkan = struct {
         texcoord: @Vector(2, f32),
     };
 
-    fn parseObj(comptime path: []const u8) ![]Vertex {
+    const ObjModel = struct {
+        vertices: []Vertex,
+        indices: []u16,
+    };
+
+    fn parseObj(comptime path: []const u8) !ObjModel {
         @setEvalBranchQuota(100000);
         const obj = @embedFile(path);
         const num_lines = std.mem.count(u8, obj, "\n");
@@ -381,7 +387,10 @@ const Vulkan = struct {
                 };
             }
         }
-        return &result;
+        return .{
+            .vertices = &result,
+            .indices = &.{},
+        };
     }
 
     const vertex_bindings = [_]c.VkVertexInputBindingDescription{
@@ -418,25 +427,37 @@ const Vulkan = struct {
     };
 
     const Mesh = struct {
-        draw_count: u32,
-        buffer: Buffer,
+        draw_count: u16,
+        vbo: Buffer,
+        // ibo: Buffer,
 
         fn init(renderer: *const Vulkan, comptime file: []const u8) !Mesh {
-            const warped_cube = comptime try parseObj(options.files_folder ++ "/" ++ file ++ ".obj");
+            const obj = comptime try parseObj(options.files_folder ++ "/" ++ file ++ ".obj");
             var result: Mesh = undefined;
-            result.draw_count = warped_cube.len;
-            const sizeof_vertices = @sizeOf(Vertex) * warped_cube.len;
-            result.buffer = try Buffer.init(renderer, sizeof_vertices, c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            result.draw_count = obj.vertices.len; //obj.indices.len;
+
             var data: ?*anyopaque = undefined;
-            try vkCheck(c.vkMapMemory(renderer.device, result.buffer.memory, 0, sizeof_vertices, 0, &data));
+            // vbo
+            const sizeof_vertices = @sizeOf(Vertex) * obj.vertices.len;
+            result.vbo = try Buffer.init(renderer, sizeof_vertices, c.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            try vkCheck(c.vkMapMemory(renderer.device, result.vbo.memory, 0, sizeof_vertices, 0, &data));
             std.debug.assert(data != null);
-            std.mem.copy(Vertex, @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), data.?))[0..warped_cube.len], warped_cube);
-            c.vkUnmapMemory(renderer.device, result.buffer.memory);
+            std.mem.copy(Vertex, @ptrCast([*]Vertex, @alignCast(@alignOf(Vertex), data.?))[0..obj.vertices.len], obj.vertices);
+            c.vkUnmapMemory(renderer.device, result.vbo.memory);
+
+            // ibo
+            // const sizeof_indices = @sizeOf(u16) * obj.indices.len;
+            // result.ibo = try Buffer.init(renderer, sizeof_indices, c.VK_BUFFER_USAGE_INDEX_BUFFER_BIT, c.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | c.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            // try vkCheck(c.vkMapMemory(renderer.device, result.ibo.memory, 0, sizeof_indices, 0, &data));
+            // std.debug.assert(data != null);
+            // std.mem.copy(u16, @ptrCast([*]u16, @alignCast(@alignOf(u16), data.?))[0..obj.indices.len], obj.indices);
+            // c.vkUnmapMemory(renderer.device, result.ibo.memory);
             return result;
         }
 
         fn deinit(self: Mesh) void {
-            self.buffer.deinit();
+            // self.ibo.deinit();
+            self.vbo.deinit();
         }
     };
 
@@ -1057,7 +1078,7 @@ const Vulkan = struct {
                 .mvp = vp.mul(object.transform.matrix()),
             }));
             const gpu_mesh = self.gpu_meshes[@enumToInt(object.mesh)];
-            c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpu_mesh.buffer.buffer, &[_]c.VkDeviceSize{0});
+            c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpu_mesh.vbo.buffer, &[_]c.VkDeviceSize{0});
             c.vkCmdDraw(buffer, gpu_mesh.draw_count, 1, 0, 0);
         }
         c.vkCmdEndRenderPass(buffer);
