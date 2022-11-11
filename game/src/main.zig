@@ -247,7 +247,7 @@ const Vulkan = struct {
     current_frame: u32,
     view: Matrix(4, 4, f32),
     projection: Matrix(4, 4, f32),
-    render_objects: std.ArrayList(RenderObject),
+    render_objects: std.ArrayList(*const RenderObject),
     gpu_meshes: [options.files.len]Mesh,
 
     fn find_mem_type(self: Vulkan, type_filter: u32, properties: c.VkMemoryPropertyFlags) !u32 {
@@ -529,6 +529,7 @@ const Vulkan = struct {
     fn init(window: Window) !Vulkan {
         var result: Vulkan = undefined;
         result.current_frame = 0;
+        result.render_objects = std.ArrayList(*const Renderer.RenderObject).init(std.heap.c_allocator);
         // createInstance()
         {
             const instance_extensions = [_][*c]const u8{ c.VK_KHR_SURFACE_EXTENSION_NAME, switch (platform.Windowing) {
@@ -986,6 +987,7 @@ const Vulkan = struct {
         c.vkDestroyDevice(self.device, null);
         c.vkDestroySurfaceKHR(self.instance, self.surface, null);
         c.vkDestroyInstance(self.instance, null);
+        self.render_objects.deinit();
     }
 
     fn record_buffer(self: *Vulkan, buffer: c.VkCommandBuffer, image_index: u32) !void {
@@ -1237,25 +1239,25 @@ pub fn main() !void {
             direction[0] -= 1.0;
         }
         const direction_len = @sqrt(@reduce(.Add, direction * direction));
-        direction = if (std.math.approxEqAbs(f32, direction_len, 0.0, std.math.floatEps(f32)))
+        direction = if (std.math.approxEqAbs(f32, direction_len, 0.0, comptime std.math.floatEps(f32)))
             @splat(3, @as(f32, 0.0))
         else
             direction / @splat(3, direction_len);
         const speed = 5.0;
         view.position -= direction * @splat(3, @floatCast(f32, time.delta) * speed);
 
-        renderer.render_objects = std.ArrayList(Renderer.RenderObject).init(std.heap.c_allocator);
-        defer renderer.render_objects.deinit();
-        try renderer.render_objects.append(.{
+        try renderer.render_objects.append(&Renderer.RenderObject{
             .mesh = if (@floatToInt(u64, time.running) % 2 == 0) .cube1 else .warped_cube,
             .transform = Transform{
                 // .position = .{ @floatCast(f32, @sin(time.running)) * 5.0, 0.0, 0.0 },
                 .rotation = @splat(3, @floatCast(f32, time.running)),
             },
         });
+
         renderer.view = view.matrix();
 
         try renderer.update();
+        renderer.render_objects.clearRetainingCapacity();
         input.save();
     }
 }
