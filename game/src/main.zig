@@ -42,12 +42,23 @@ const Input = struct {
         left_control, left_alt, left_shift, right_control, right_alt, right_shift,
     };
     // zig fmt: on
+    pub const MouseButtons = enum {
+        left,
+        middle,
+        right,
+    };
 
     keys: std.EnumArray(Keys, bool) = std.EnumArray(Keys, bool).initFill(false),
     keys_previous: std.EnumArray(Keys, bool) = std.EnumArray(Keys, bool).initFill(false),
+    buttons: std.EnumArray(MouseButtons, bool) = std.EnumArray(MouseButtons, bool).initFill(false),
+    buttons_previous: std.EnumArray(MouseButtons, bool) = std.EnumArray(MouseButtons, bool).initFill(false),
+    mouse: @Vector(3, i32) = @splat(3, @as(i32, 0.0)),
 
     pub fn save(self: *Input) void {
         self.keys_previous = self.keys;
+        self.buttons_previous = self.buttons;
+        // NOTE: z is the delta of mousewheelscroll per frame. it doesn't need to be saved, just reset
+        self.mouse[2] = 0;
     }
 
     pub fn setKey(self: *Input, key: Keys, value: bool) void {
@@ -68,6 +79,26 @@ const Input = struct {
 
     pub fn getKeyJustUp(self: Input, key: Keys) bool {
         return !self.keys.get(key) and self.keys_previous.get(key);
+    }
+
+    pub fn setMouseButton(self: *Input, button: MouseButtons, value: bool) void {
+        self.buttons.set(button, value);
+    }
+
+    pub fn getMouseButtonDown(self: Input, button: MouseButtons) bool {
+        return self.buttons.get(button);
+    }
+
+    pub fn getMouseButtonUp(self: Input, button: MouseButtons) bool {
+        return !self.buttons.get(button);
+    }
+
+    pub fn getMouseButtonJustDown(self: Input, button: MouseButtons) bool {
+        return self.buttons.get(button) and !self.buttons_previous.get(button);
+    }
+
+    pub fn getMouseButtonJustUp(self: Input, button: MouseButtons) bool {
+        return !self.buttons.get(button) and self.buttons_previous.get(button);
     }
 };
 
@@ -942,10 +973,6 @@ const Vulkan = struct {
                 .commandBufferCount = result.image_count,
             }), result.graphics_command_buffers.ptr));
         }
-        // resize()
-        {
-            result.projection = Matrix(4, 4, f32).perspective(std.math.pi / 2.0, @intToFloat(f32, result.surface_capabilities.currentExtent.width) / @intToFloat(f32, result.surface_capabilities.currentExtent.height), 0.1, 100.0);
-        }
     }
 
     fn swapchain_deinit(self: Vulkan) void {
@@ -1090,7 +1117,7 @@ const Xlib = struct {
         const scr = c.XDefaultScreen(result.dpy);
         const root = c.XRootWindow(result.dpy, scr);
         var attrs = std.mem.zeroInit(c.XSetWindowAttributes, .{
-            .event_mask = c.KeyPressMask | c.KeyReleaseMask,
+            .event_mask = c.KeyPressMask | c.KeyReleaseMask | c.ButtonPressMask | c.ButtonReleaseMask,
         });
         result.win = c.XCreateWindow(
             result.dpy,
@@ -1132,6 +1159,11 @@ const Xlib = struct {
         .left_control = c.XK_Control_L, .left_alt = c.XK_Alt_L, .left_shift = c.XK_Shift_L, .right_control = c.XK_Control_R, .right_alt = c.XK_Alt_R, .right_shift = c.XK_Shift_R,
     });
     // zig fmt: on
+    const button_lookup = std.enums.directEnumArray(Input.MouseButtons, u8, 0, .{
+        .left = c.Button1,
+        .middle = c.Button2,
+        .right = c.Button3,
+    });
     fn update(self: *Xlib, input: *Input) ?void {
         while (c.XPending(self.dpy) > 0) {
             var ev: c.XEvent = undefined;
@@ -1144,6 +1176,20 @@ const Xlib = struct {
                     while (i < key_lookup.len) : (i += 1) {
                         if (key_lookup[i] == sym)
                             input.setKey(@intToEnum(Input.Keys, i), pressed);
+                    }
+                },
+                c.ButtonPress, c.ButtonRelease => {
+                    const pressed = ev.type == c.ButtonPress;
+                    switch (ev.xbutton.button) {
+                        c.Button4 => input.mouse[2] += 1,
+                        c.Button5 => input.mouse[2] -= 1,
+                        else => |b| {
+                            var i: usize = 0;
+                            while (i < button_lookup.len) : (i += 1) {
+                                if (button_lookup[i] == b)
+                                    input.setMouseButton(@intToEnum(Input.MouseButtons, i), pressed);
+                            }
+                        },
                     }
                 },
                 c.MappingNotify => _ = c.XRefreshKeyboardMapping(&ev.xmapping),
@@ -1254,6 +1300,10 @@ pub fn main() !void {
             },
         });
 
+        // resize()
+        {
+            renderer.projection = Matrix(4, 4, f32).perspective(std.math.pi / 2.0, @intToFloat(f32, renderer.surface_capabilities.currentExtent.width) / @intToFloat(f32, renderer.surface_capabilities.currentExtent.height), 0.1, 100.0);
+        }
         renderer.view = view.matrix();
 
         try renderer.update();
