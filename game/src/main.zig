@@ -308,16 +308,13 @@ const Vulkan = struct {
     fn parseObj(comptime path: []const u8) !ObjModel {
         @setEvalBranchQuota(100000);
         const obj = @embedFile(path);
-        const num_lines = std.mem.count(u8, obj, "\n");
 
-        var positions: [num_lines]@Vector(3, f32) = undefined;
-        var num_positions: usize = 0;
-
-        var normals: [num_lines]@Vector(3, f32) = undefined;
-        var num_normals: usize = 0;
-
-        var texcoords: [num_lines]@Vector(2, f32) = undefined;
-        var num_texcoords: usize = 0;
+        // NOTE: Remove Vec3 when Zig compiler bug is fixed
+        // error: expected type '*@Vector(3, f32)', found '*align(0:96:16) @Vector(3, f32)'
+        // potentially this: https://github.com/ziglang/zig/issues/12812
+        const Vec3 = struct {
+            data: @Vector(3, f32),
+        };
 
         const Face = struct {
             position_indices: [3]u16,
@@ -325,8 +322,10 @@ const Vulkan = struct {
             texcoord_indices: [3]u16,
         };
 
-        var faces: [num_lines]Face = undefined;
-        var num_faces: usize = 0;
+        var positions = std.BoundedArray(Vec3, std.mem.count(u8, obj, "v ")){};
+        var normals = std.BoundedArray(Vec3, std.mem.count(u8, obj, "vn ")){};
+        var texcoords = std.BoundedArray(@Vector(2, f32), std.mem.count(u8, obj, "vt ")){};
+        var faces = std.BoundedArray(Face, std.mem.count(u8, obj, "f ")){};
 
         var stream = std.io.fixedBufferStream(obj);
         const reader = stream.reader();
@@ -337,59 +336,53 @@ const Vulkan = struct {
             switch (line[0]) {
                 'v' => {
                     switch (line[1]) {
-                        ' ' => {
-                            positions[num_positions] = (@Vector(3, f32){
-                                try std.fmt.parseFloat(f32, tokens.next().?),
-                                try std.fmt.parseFloat(f32, tokens.next().?),
-                                try std.fmt.parseFloat(f32, tokens.next().?),
-                            });
-                            num_positions += 1;
-                        },
-                        'n' => {
-                            normals[num_normals] = (@Vector(3, f32){
-                                try std.fmt.parseFloat(f32, tokens.next().?),
-                                try std.fmt.parseFloat(f32, tokens.next().?),
-                                try std.fmt.parseFloat(f32, tokens.next().?),
-                            });
-                            num_normals += 1;
-                        },
-                        't' => {
-                            texcoords[num_texcoords] = (@Vector(2, f32){
-                                try std.fmt.parseFloat(f32, tokens.next().?),
-                                try std.fmt.parseFloat(f32, tokens.next().?),
-                            });
-                            num_texcoords += 1;
-                        },
+                        ' ' => positions.appendAssumeCapacity(.{ .data = .{
+                            try std.fmt.parseFloat(f32, tokens.next().?),
+                            try std.fmt.parseFloat(f32, tokens.next().?),
+                            try std.fmt.parseFloat(f32, tokens.next().?),
+                        } }),
+                        'n' => normals.appendAssumeCapacity(.{ .data = .{
+                            try std.fmt.parseFloat(f32, tokens.next().?),
+                            try std.fmt.parseFloat(f32, tokens.next().?),
+                            try std.fmt.parseFloat(f32, tokens.next().?),
+                        } }),
+                        't' => texcoords.appendAssumeCapacity(.{
+                            try std.fmt.parseFloat(f32, tokens.next().?),
+                            try std.fmt.parseFloat(f32, tokens.next().?),
+                        }),
                         else => unreachable,
                     }
                 },
-                'f' => {
+                'f' => faces.appendAssumeCapacity(blk: {
+                    // NOTE: OBJ FACE ORDER IS V/T/N
+                    var result: Face = undefined;
                     comptime var i = 0;
                     inline while (i < 3) : (i += 1) {
                         var inner_tokens = std.mem.split(u8, tokens.next().?, "/");
-                        faces[num_faces].position_indices[i] = try std.fmt.parseUnsigned(u16, inner_tokens.next().?, 10) - 1;
-                        faces[num_faces].normal_indices[i] = try std.fmt.parseUnsigned(u16, inner_tokens.next().?, 10) - 1;
-                        faces[num_faces].texcoord_indices[i] = try std.fmt.parseUnsigned(u16, inner_tokens.next().?, 10) - 1;
+                        result.position_indices[i] = try std.fmt.parseUnsigned(u16, inner_tokens.next().?, 10) - 1;
+                        result.texcoord_indices[i] = try std.fmt.parseUnsigned(u16, inner_tokens.next().?, 10) - 1;
+                        result.normal_indices[i] = try std.fmt.parseUnsigned(u16, inner_tokens.next().?, 10) - 1;
                     }
-                    num_faces += 1;
-                },
+                    break :blk result;
+                }),
                 else => {},
             }
         }
 
-        var vertices: [num_faces * 3]Vertex = undefined;
+        var vertices: [faces.len * 3]Vertex = undefined;
         var num_vertices: usize = 0;
-        var indices: [num_faces * 3]u16 = undefined;
-        for (faces[0..num_faces]) |face, i| {
+        var indices: [faces.len * 3]u16 = undefined;
+
+        for (faces.constSlice()) |face, i| {
             comptime var j = 0;
             inline while (j < 3) : (j += 1) {
-                vertices[num_vertices] = .{
-                    .position = positions[face.position_indices[j]],
-                    .normal = normals[face.normal_indices[j]],
-                    .texcoord = texcoords[face.texcoord_indices[j]],
+                vertices[i * 3 + j] = .{
+                    .position = positions.get(face.position_indices[j]).data,
+                    .normal = normals.get(face.normal_indices[j]).data,
+                    .texcoord = texcoords.get(face.texcoord_indices[j]),
                 };
-                defer num_vertices += 1;
                 indices[i * 3 + j] = num_vertices;
+                num_vertices += 1;
             }
         }
         return .{
