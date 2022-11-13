@@ -297,7 +297,7 @@ const Vulkan = struct {
     current_frame: u32,
     view: Matrix(4, 4, f32),
     projection: Matrix(4, 4, f32),
-    render_objects: std.ArrayList(*const RenderObject),
+    render_objects: std.TailQueue(RenderObject),
     gpu_meshes: [options.files.len]Mesh,
 
     fn find_mem_type(self: Vulkan, type_filter: u32, properties: c.VkMemoryPropertyFlags) !u32 {
@@ -594,7 +594,7 @@ const Vulkan = struct {
     fn init(window: Window) !Vulkan {
         var result: Vulkan = undefined;
         result.current_frame = 0;
-        result.render_objects = std.ArrayList(*const Renderer.RenderObject).init(std.heap.c_allocator);
+        result.render_objects = std.TailQueue(RenderObject){};
         // createInstance()
         {
             const instance_extensions = [_][*c]const u8{ c.VK_KHR_SURFACE_EXTENSION_NAME, switch (platform.Windowing) {
@@ -1048,7 +1048,6 @@ const Vulkan = struct {
         c.vkDestroyDevice(self.device, null);
         c.vkDestroySurfaceKHR(self.instance, self.surface, null);
         c.vkDestroyInstance(self.instance, null);
-        self.render_objects.deinit();
     }
 
     fn record_buffer(self: *Vulkan, buffer: c.VkCommandBuffer, image_index: u32) !void {
@@ -1084,11 +1083,11 @@ const Vulkan = struct {
             .extent = self.surface_capabilities.currentExtent,
         }));
         const vp = self.projection.mul(self.view);
-        for (self.render_objects.items) |object| {
+        while (self.render_objects.pop()) |object| {
             c.vkCmdPushConstants(buffer, self.mesh_graphics_pipeline_layout, c.VK_SHADER_STAGE_VERTEX_BIT, 0, @sizeOf(MeshPushConstants), &zi(MeshPushConstants, .{
-                .mvp = vp.mul(object.transform.matrix()),
+                .mvp = vp.mul(object.data.transform.matrix()),
             }));
-            const gpu_mesh = self.gpu_meshes[@enumToInt(object.mesh)];
+            const gpu_mesh = self.gpu_meshes[@enumToInt(object.data.mesh)];
             c.vkCmdBindVertexBuffers(buffer, 0, 1, &gpu_mesh.vbo.buffer, &[_]c.VkDeviceSize{0});
             c.vkCmdBindIndexBuffer(buffer, gpu_mesh.ibo.buffer, 0, c.VK_INDEX_TYPE_UINT16);
             c.vkCmdDrawIndexed(buffer, gpu_mesh.draw_count, 1, 0, 0, 0);
@@ -1327,13 +1326,14 @@ pub fn main() !void {
         const speed = 5.0;
         view.position -= direction * @splat(3, @floatCast(f32, time.delta) * speed);
 
-        try renderer.render_objects.append(&Renderer.RenderObject{
+        const nodedata = Renderer.RenderObject{
             .mesh = if (@floatToInt(u64, time.running) % 2 == 0) .cube1 else .warped_cube,
             .transform = Transform{
                 // .position = .{ @floatCast(f32, @sin(time.running)) * 5.0, 0.0, 0.0 },
                 .rotation = @splat(3, @floatCast(f32, time.running)),
             },
-        });
+        };
+        renderer.render_objects.append(&.{ .data = nodedata });
 
         // resize()
         {
@@ -1343,7 +1343,6 @@ pub fn main() !void {
         renderer.view = view.matrix();
 
         try renderer.update();
-        renderer.render_objects.clearRetainingCapacity();
         input.save();
     }
 }
