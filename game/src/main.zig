@@ -132,7 +132,7 @@ fn Matrix(
             comptime std.debug.assert(w == h);
             comptime var result = O();
             inline for (result.data) |*row, i| {
-                row.*[i] = 1.0;
+                row.*[i] = @as(Element, 1);
             }
             return result;
         }
@@ -177,6 +177,22 @@ fn Matrix(
             result.data[3][2] = (znear * zfar) / (zfar - znear);
             // copy -z into w for perspective divide
             result.data[2][3] = -@as(Element, 1);
+            return result;
+        }
+
+        fn orthographic(left: Element, right: Element, top: Element, bottom: Element, near: Element, far: Element) Self {
+            comptime std.debug.assert(w == 4);
+            var result = O();
+            // scale
+            result.data[0][0] = @as(Element, 2) / (right - left);
+            result.data[1][1] = @as(Element, 2) / (top - bottom);
+            result.data[2][2] = -@as(Element, 2) / (far - near);
+            // translate
+            result.data[3][0] = -(right + left) / (right - left);
+            result.data[3][1] = -(top + bottom) / (top - bottom);
+            result.data[3][2] = -(far + near) / (far - near);
+
+            result.data[3][3] = @as(Element, 1);
             return result;
         }
 
@@ -1325,6 +1341,7 @@ pub fn main() !void {
         // resize()
         {
             renderer.projection = Matrix(4, 4, f32).perspective(std.math.pi / 2.0, @intToFloat(f32, renderer.surface_capabilities.currentExtent.width) / @intToFloat(f32, renderer.surface_capabilities.currentExtent.height), 0.1, 100.0);
+            // renderer.projection = Matrix(4, 4, f32).orthographic(0.0, @intToFloat(f32, renderer.surface_capabilities.currentExtent.width), -@intToFloat(f32, renderer.surface_capabilities.currentExtent.height), 0.0, -1.0, 1.0);
         }
         renderer.view = view.matrix();
 
