@@ -122,13 +122,13 @@ fn Matrix(
 
         data: [w]@Vector(h, Element),
 
-        fn O() Self {
+        inline fn O() Self {
             return .{
                 .data = [_]@Vector(h, Element){@splat(h, @as(Element, 0))} ** w,
             };
         }
 
-        fn I() Self {
+        inline fn I() Self {
             comptime std.debug.assert(w == h);
             comptime var result = O();
             inline for (result.data) |*row, i| {
@@ -138,7 +138,7 @@ fn Matrix(
         }
 
         fn mul(self: Self, other: Self) Self {
-            var result = comptime O();
+            var result = O();
             comptime var i = 0;
             inline while (i < w) : (i += 1) {
                 comptime var j = 0;
@@ -317,8 +317,8 @@ const Vulkan = struct {
     };
 
     const ObjModel = struct {
-        vertices: []Vertex,
-        indices: []u16,
+        vertices: []const Vertex,
+        indices: []const u16,
     };
 
     fn parseObj(comptime path: []const u8) !ObjModel {
@@ -385,25 +385,22 @@ const Vulkan = struct {
             }
         }
 
-        var vertices: [faces.len * 3]Vertex = undefined;
-        var num_vertices: usize = 0;
-        var indices: [faces.len * 3]u16 = undefined;
-
-        for (faces.constSlice()) |face, i| {
+        var vertices = std.BoundedArray(Vertex, faces.len * 3){};
+        var indices = std.BoundedArray(u16, faces.len * 3){};
+        for (faces.constSlice()) |face| {
             comptime var j = 0;
             inline while (j < 3) : (j += 1) {
-                vertices[i * 3 + j] = .{
+                vertices.appendAssumeCapacity(.{
                     .position = positions.get(face.position_indices[j]).data,
                     .normal = normals.get(face.normal_indices[j]).data,
                     .texcoord = texcoords.get(face.texcoord_indices[j]),
-                };
-                indices[i * 3 + j] = num_vertices;
-                num_vertices += 1;
+                });
+                indices.appendAssumeCapacity(vertices.len - 1);
             }
         }
         return .{
-            .vertices = &vertices,
-            .indices = &indices,
+            .vertices = vertices.constSlice(),
+            .indices = indices.constSlice(),
         };
     }
 
