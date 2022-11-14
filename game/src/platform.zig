@@ -13,3 +13,12 @@ pub const Rendering = switch (builtin.os.tag) {
     .linux, .windows => RenderAPI.vulkan,
     else => @compileError("not supported"),
 };
+
+pub const Window = switch (Windowing) {
+    .xlib => @import("windowing/xlib.zig"),
+    .win32 => @import("windowing/win32.zig"),
+};
+
+pub const Renderer = switch (Rendering) {
+    .vulkan => @import("rendering/vulkan.zig"),
+};

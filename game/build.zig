@@ -9,7 +9,7 @@ pub fn build(b: *std.build.Builder) !void {
     defer files.deinit();
     var options = b.addOptions();
 
-    var dir = try std.fs.cwd().openIterableDir("src/meshes", .{});
+    var dir = try std.fs.cwd().openIterableDir("src/_meshes", .{});
     defer dir.close();
     var it = dir.iterate();
     while (try it.next()) |file| {
@@ -18,7 +18,7 @@ pub fn build(b: *std.build.Builder) !void {
 
         try files.append(b.dupe(file.name[0 .. std.mem.indexOf(u8, file.name, ".") orelse unreachable]));
     }
-    options.addOption([]const u8, "files_folder", "meshes");
+    options.addOption([]const u8, "files_folder", "_meshes");
     options.addOption([]const []const u8, "files", files.items);
 
     const exe = b.addExecutable("game", "src/main.zig");
@@ -53,7 +53,7 @@ pub fn build(b: *std.build.Builder) !void {
     run_step.dependOn(&run_cmd.step);
 
     // NOTE: shader step only works on unix-like systems (currently?)
-    const shaders_cmd = b.addSystemCommand(&[_][]const u8{ "/usr/bin/env", "bash", "-c", "spirv-link <(glslc src/shaders/mesh.vert -o -) <(glslc src/shaders/mesh.frag -o -) -o src/shaders/mesh.spv" });
+    const shaders_cmd = b.addSystemCommand(&[_][]const u8{ "/usr/bin/env", "bash", "-c", "spirv-link <(glslc src/_shaders/mesh.vert -o -) <(glslc src/_shaders/mesh.frag -o -) -o src/_shaders/mesh.spv" });
     const shaders_step = b.step("shaders", "Compile and Link SPIR-V binaries");
     shaders_step.dependOn(&shaders_cmd.step);
 }
