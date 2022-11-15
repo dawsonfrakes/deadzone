@@ -46,7 +46,7 @@ pub fn main() !void {
         view.position -= direction * @splat(3, @floatCast(f32, time.delta) * speed);
 
         const nodedata = Renderer.RenderObject{
-            .mesh = if (@floatToInt(u64, time.running) % 2 == 0) .cube1 else .warped_cube,
+            .mesh = .cube,
             .transform = Maths.Transform{
                 // .position = .{ @floatCast(f32, @sin(time.running)) * 5.0, 0.0, 0.0 },
                 .rotation = @splat(3, @floatCast(f32, time.running)),
