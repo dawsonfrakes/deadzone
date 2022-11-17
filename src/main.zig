@@ -79,6 +79,12 @@ const GLFuncs = struct {
     ProgramUniformMatrix4fv: *const fn (program: c.GLuint, location: c.GLint, count: c.GLsizei, transpose: c.GLboolean, value: [*]const c.GLfloat) void,
     UseProgram: *const fn (program: c.GLuint) void,
     DeleteProgram: *const fn (program: c.GLuint) void,
+
+    CreateTextures: *const fn (target: c.GLenum, n: c.GLsizei, textures: [*]c.GLuint) void,
+    BindTextureUnit: *const fn (unit: c.GLuint, texture: c.GLuint) void,
+    TextureStorage2D: *const fn (texture: c.GLuint, levels: c.GLsizei, internalformat: c.GLenum, width: c.GLsizei, height: c.GLsizei) void,
+    TextureSubImage2D: *const fn (texture: c.GLuint, level: c.GLint, xoffset: c.GLint, yoffset: c.GLint, width: c.GLsizei, height: c.GLsizei, format: c.GLenum, type: c.GLenum, pixels: *const anyopaque) void,
+    DeleteTextures: *const fn (n: c.GLsizei, textures: [*]const c.GLuint) void,
 };
 
 var gl: GLFuncs = undefined;
@@ -336,9 +342,9 @@ pub fn main() !void {
         },
     });
 
-    const dist = 20.0;
-    const projection = comptime Matrix(4, 4, f32).orthographic(0.0, 16.0, 0.0, 9.0, -dist, dist);
-    // const projection = comptime Matrix(4, 4, f32).perspective(std.math.pi / 2.0, 800.0 / 600.0, 0.1, 100.0);
+    // const dist = 20.0;
+    // const projection = comptime Matrix(4, 4, f32).orthographic(0.0, 16.0, 0.0, 9.0, -dist, dist);
+    const projection = comptime Matrix(4, 4, f32).perspective(std.math.pi / 2.0, 800.0 / 600.0, 0.1, 100.0);
     const view = comptime Matrix(4, 4, f32).I().translate(.{ 0.0, 0.0, -10.0 });
     const model = comptime Matrix(4, 4, f32).I().scale(.{ 10.0, 10.0, 0.0 });
     shader.uploadMat4("mvp", projection.mul(view.mul(model)));
