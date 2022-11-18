@@ -47,7 +47,34 @@ const GL_ZERO_TO_ONE = 0x935F;
 const GL_LOWER_LEFT = 0x8CA1;
 const GL_UPPER_LEFT = 0x8CA2;
 
+const GL_COMPILE_STATUS = 0x8B81;
+const GL_INFO_LOG_LENGTH = 0x8B84;
+const GL_LINK_STATUS = 0x8B82;
+
+const GL_DEBUG_OUTPUT = 0x92E0;
+
+const GL_DEBUG_SOURCE_API = 0x8246;
+const GL_DEBUG_SOURCE_WINDOW_SYSTEM = 0x8247;
+const GL_DEBUG_SOURCE_SHADER_COMPILER = 0x8248;
+const GL_DEBUG_SOURCE_THIRD_PARTY = 0x8249;
+const GL_DEBUG_SOURCE_APPLICATION = 0x824A;
+const GL_DEBUG_SOURCE_OTHER = 0x824B;
+
+const GL_DEBUG_TYPE_ERROR = 0x824C;
+const GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR = 0x824D;
+const GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
+const GL_DEBUG_TYPE_PORTABILITY = 0x824F;
+const GL_DEBUG_TYPE_PERFORMANCE = 0x8250;
+const GL_DEBUG_TYPE_MARKER = 0x8268;
+const GL_DEBUG_TYPE_OTHER = 0x8251;
+
+const GL_DEBUG_SEVERITY_NOTIFICATION = 0x826B;
+const GL_DEBUG_SEVERITY_LOW = 0x9148;
+const GL_DEBUG_SEVERITY_MEDIUM = 0x9147;
+const GL_DEBUG_SEVERITY_HIGH = 0x9146;
+
 const GLFuncs = struct {
+    DebugMessageCallback: *const fn (callback: *const fn (source: c.GLenum, type: c.GLenum, id: c.GLuint, severity: c.GLenum, length: c.GLsizei, message: [*]const GLchar, userParam: ?*const anyopaque) void, userParam: ?*anyopaque) void,
     ClipControl: *const fn (origin: c.GLenum, depth: c.GLenum) void,
 
     CreateVertexArrays: *const fn (n: c.GLsizei, arrays: [*]c.GLuint) void,
@@ -69,12 +96,17 @@ const GLFuncs = struct {
     CreateShader: *const fn (shaderType: c.GLenum) c.GLuint,
     ShaderSource: *const fn (shader: c.GLuint, count: c.GLsizei, string: [*]const [*:0]const GLchar, length: ?[*]const c.GLint) void,
     CompileShader: *const fn (shader: c.GLuint) void,
+    GetShaderiv: *const fn (shader: c.GLuint, pname: c.GLenum, params: *c.GLint) void,
+    GetShaderInfoLog: *const fn (shader: c.GLuint, maxLength: c.GLsizei, length: ?*c.GLsizei, infoLog: [*]GLchar) void,
     DeleteShader: *const fn (shader: c.GLuint) void,
 
     CreateProgram: *const fn () c.GLuint,
     AttachShader: *const fn (program: c.GLuint, shader: c.GLuint) void,
     DetachShader: *const fn (program: c.GLuint, shader: c.GLuint) void,
     LinkProgram: *const fn (program: c.GLuint) void,
+    GetProgramiv: *const fn (program: c.GLuint, pname: c.GLenum, params: *c.GLint) void,
+    GetProgramInfoLog: *const fn (program: c.GLuint, maxLength: c.GLsizei, length: *c.GLsizei, infoLog: [*]GLchar) void,
+
     GetUniformLocation: *const fn (program: c.GLuint, name: [*:0]const GLchar) c.GLint,
     ProgramUniformMatrix4fv: *const fn (program: c.GLuint, location: c.GLint, count: c.GLsizei, transpose: c.GLboolean, value: [*]const c.GLfloat) void,
     UseProgram: *const fn (program: c.GLuint) void,
@@ -89,13 +121,13 @@ const GLFuncs = struct {
 
 var gl: GLFuncs = undefined;
 
-fn load_func(name: [:0]const u8) !?*anyopaque {
+fn loadGLFunc(name: [:0]const u8) !?*anyopaque {
     return wglGetProcAddress(name) orelse return error.CouldNotLoadFunc;
 }
 
-fn load_funcs() !void {
+fn loadGLFuncs() !void {
     inline for (@typeInfo(GLFuncs).Struct.fields) |field| {
-        @field(gl, field.name) = @ptrCast(field.field_type, try load_func("gl" ++ field.name));
+        @field(gl, field.name) = @ptrCast(field.field_type, try loadGLFunc("gl" ++ field.name));
     }
 }
 
@@ -145,7 +177,7 @@ fn createContext(dc: windows.HDC) !HGLRC {
         errdefer _ = gdi32.wglMakeCurrent(dc, null);
 
         wglCreateContextAttribsARB = @ptrCast(*const fn (hdc: ?windows.HDC, hshareContext: ?HGLRC, attribList: []const i32) ?HGLRC, wglGetProcAddress("wglCreateContextAttribsARB") orelse return windows.unexpectedError(kernel32.GetLastError()));
-        try load_funcs();
+        try loadGLFuncs();
     }
 
     const WGL_CONTEXT_MAJOR_VERSION_ARB = 0x2091;
@@ -166,46 +198,169 @@ fn createContext(dc: windows.HDC) !HGLRC {
     return context;
 }
 
-const Shader = struct {
-    const Module = struct {
+pub const Shader = struct {
+    pub const Module = struct {
         file_path: []const u8,
         shader_type: c.GLenum,
     };
 
     var loaded_shaders: std.StringHashMap(c.GLuint) = std.StringHashMap(c.GLuint).init(std.heap.c_allocator);
     program: c.GLuint,
+    success: bool = true,
 
-    fn init(comptime modules: []const Module) Shader {
+    pub fn init(comptime modules: []const Module) Shader {
         var result = Shader{ .program = gl.CreateProgram() };
         var shaders = std.BoundedArray(c.GLuint, modules.len){};
         inline for (modules) |module| {
-            const shader = (loaded_shaders.getOrPutValue(module.file_path, gl.CreateShader(module.shader_type)) catch unreachable).value_ptr.*;
-            shaders.appendAssumeCapacity(shader);
-            gl.ShaderSource(shader, 1, &[_][*:0]const u8{@embedFile(module.file_path)}, null);
-            gl.CompileShader(shader);
-            gl.AttachShader(result.program, shader);
+            const shader = blk: {
+                if (loaded_shaders.get(module.file_path)) |s| {
+                    break :blk s;
+                } else {
+                    const s = gl.CreateShader(module.shader_type);
+                    gl.ShaderSource(s, 1, &[_][*:0]const u8{@embedFile(module.file_path)}, null);
+                    gl.CompileShader(s);
+                    var status: c.GLint = undefined;
+                    gl.GetShaderiv(s, GL_COMPILE_STATUS, &status);
+                    if (status == c.GL_FALSE) {
+                        var length: c.GLint = undefined;
+                        gl.GetShaderiv(s, GL_INFO_LOG_LENGTH, &length);
+                        var e = std.BoundedArray(u8, 1024).init(@intCast(usize, length)) catch @panic("length not long enough");
+                        gl.GetShaderInfoLog(s, 1024, &length, &e.buffer);
+                        std.debug.print("COMPILEERROR : {s}:{s}", .{ module.file_path, e.constSlice() });
+                        gl.DeleteShader(s);
+                        break :blk null;
+                    }
+                    loaded_shaders.putNoClobber(module.file_path, s) catch @panic("no space");
+                    break :blk s;
+                }
+            };
+            if (shader) |s| {
+                shaders.appendAssumeCapacity(s);
+                gl.AttachShader(result.program, s);
+            }
         }
         gl.LinkProgram(result.program);
         for (shaders.constSlice()) |shader| {
             gl.DetachShader(result.program, shader);
         }
+        var status: c.GLint = undefined;
+        gl.GetProgramiv(result.program, GL_LINK_STATUS, &status);
+        if (status == c.GL_FALSE) {
+            var length: c.GLint = undefined;
+            gl.GetProgramiv(result.program, GL_INFO_LOG_LENGTH, &length);
+            var e = std.BoundedArray(u8, 1024).init(@intCast(usize, length)) catch @panic("length not long enough");
+            gl.GetProgramInfoLog(result.program, 1024, &length, &e.buffer);
+            std.debug.print("LINKERROR : Modules={{ ", .{});
+            for (modules) |module| {
+                std.debug.print("{s} ", .{module.file_path});
+            }
+            std.debug.print("}}\n{s}", .{e.constSlice()});
+            gl.DeleteProgram(result.program);
+            result.success = false;
+        }
         return result;
     }
 
-    fn deinit(self: Shader) void {
+    pub fn deinit(self: Shader) void {
         gl.DeleteProgram(self.program);
     }
 
-    fn bind(self: Shader) void {
+    pub fn use(self: Shader) void {
         gl.UseProgram(self.program);
     }
 
-    fn uploadMat4(self: Shader, location: [:0]const u8, value: Matrix(4, 4, f32)) void {
+    pub fn uploadMat4(self: Shader, location: [:0]const u8, value: Matrix(4, 4, f32)) void {
         gl.ProgramUniformMatrix4fv(self.program, gl.GetUniformLocation(self.program, location), 1, c.GL_FALSE, @ptrCast(*const [16]f32, &value.data));
     }
 
-    fn unbind() void {
+    pub fn unuse() void {
         gl.UseProgram(0);
+    }
+};
+
+pub const VertexArray = struct {
+    vaobj: c.GLuint,
+    buffer: c.GLuint,
+    index_type: c.GLenum,
+    draw_count: c.GLsizei,
+    indices_offset: usize,
+
+    pub fn init(comptime VertexType: type, comptime IndexType: type, vertices: []const VertexType, indices: []const IndexType) VertexArray {
+        const result = VertexArray{
+            .vaobj = blk: {
+                var id: [1]c.GLuint = undefined;
+                gl.CreateVertexArrays(1, &id);
+                break :blk id[0];
+            },
+            .buffer = blk: {
+                var id: [1]c.GLuint = undefined;
+                gl.CreateBuffers(1, &id);
+                break :blk id[0];
+            },
+            .index_type = switch (@typeInfo(IndexType).Int.bits) {
+                16 => c.GL_UNSIGNED_SHORT,
+                32 => c.GL_UNSIGNED_INT,
+                inline else => unreachable,
+            },
+            .draw_count = @intCast(c.GLsizei, indices.len),
+            .indices_offset = 0,
+        };
+
+        const vertices_size = @sizeOf(VertexType) * vertices.len;
+        const indices_size = @sizeOf(IndexType) * indices.len;
+
+        const vertices_offset = indices_size;
+
+        gl.NamedBufferData(result.buffer, vertices_size + indices_size, null, GL_STATIC_DRAW);
+        gl.NamedBufferSubData(result.buffer, @intCast(GLintptr, result.indices_offset), @intCast(c.GLint, indices_size), indices.ptr);
+        gl.NamedBufferSubData(result.buffer, @intCast(GLintptr, vertices_offset), @intCast(c.GLint, vertices_size), vertices.ptr);
+
+        gl.VertexArrayVertexBuffer(result.vaobj, 0, result.buffer, @intCast(GLintptr, vertices_offset), @sizeOf(VertexType));
+        gl.VertexArrayElementBuffer(result.vaobj, result.buffer);
+
+        inline for (@typeInfo(VertexType).Struct.fields) |field, i| {
+            const len = switch (@typeInfo(field.field_type)) {
+                .Vector => |v| v.len,
+                inline else => 1,
+            };
+            const singletype = switch (@typeInfo(field.field_type)) {
+                .Vector => |v| @typeInfo(v.child),
+                inline else => |t| t,
+            };
+            const gltype = switch (singletype) {
+                .Int => |int| switch (int.signedness) {
+                    .signed => switch (int.bits) {
+                        8 => c.GL_BYTE,
+                        16 => c.GL_SHORT,
+                        32 => c.GL_INT,
+                    },
+                    .unsigned => switch (i.bits) {
+                        8 => c.GL_UNSIGNED_BYTE,
+                        16 => c.GL_UNSIGNED_SHORT,
+                        32 => c.GL_UNSIGNED_INT,
+                    },
+                },
+                .Float => |float| switch (float.bits) {
+                    32 => c.GL_FLOAT,
+                    64 => c.GL_DOUBLE,
+                    else => unreachable,
+                },
+                .Bool => c.GL_BYTE,
+                inline else => unreachable,
+            };
+            gl.VertexArrayAttribFormat(result.vaobj, i, len, gltype, c.GL_FALSE, @offsetOf(VertexType, field.name));
+            gl.EnableVertexArrayAttrib(result.vaobj, i);
+            gl.VertexArrayAttribBinding(result.vaobj, i, 0);
+        }
+        return result;
+    }
+
+    pub fn bind(self: VertexArray) void {
+        gl.BindVertexArray(self.vaobj);
+    }
+
+    pub fn unbind() void {
+        gl.BindVertexArray(0);
     }
 };
 
@@ -268,6 +423,7 @@ pub fn Matrix(comptime w: comptime_int, comptime h: comptime_int, comptime Eleme
                 return result;
             }
 
+            // TODO: This currently maps z to [-1, 1] and we want [0, 1]
             pub fn orthographic(left: Element, right: Element, bottom: Element, top: Element, near: Element, far: Element) Self {
                 var result = Self.I();
                 result.data[0][0] = @as(Element, 2) / (right - left);
@@ -279,25 +435,59 @@ pub fn Matrix(comptime w: comptime_int, comptime h: comptime_int, comptime Eleme
                 return result;
             }
 
-            pub fn translate(self: Self, by: @Vector(3, Element)) Self {
+            pub fn translate(by: @Vector(3, Element)) Self {
                 var result = Self.I();
                 comptime var i = 0;
                 inline while (i < 3) : (i += 1) {
                     result.data[3][i] = by[i];
                 }
-                return self.mul(result);
+                return result;
             }
 
-            pub fn scale(self: Self, by: @Vector(3, Element)) Self {
+            pub fn scale(by: @Vector(3, Element)) Self {
                 var result = Self.I();
                 comptime var i = 0;
                 inline while (i < 3) : (i += 1) {
                     result.data[i][i] = by[i];
                 }
-                return self.mul(result);
+                return result;
             }
         } else struct {};
     };
+}
+
+fn glDebugCallback(source: c.GLenum, @"type": c.GLenum, id: c.GLuint, severity: c.GLenum, length: c.GLsizei, message: [*]const GLchar, userParam: ?*const anyopaque) void {
+    _ = userParam;
+    std.debug.print("{s} {s} {s} {}: {s}\n", .{
+        switch (source) {
+            GL_DEBUG_SOURCE_API => "API",
+            GL_DEBUG_SOURCE_WINDOW_SYSTEM => "WINDOW SYSTEM",
+            GL_DEBUG_SOURCE_SHADER_COMPILER => "SHADER COMPILER",
+            GL_DEBUG_SOURCE_THIRD_PARTY => "THIRD PARTY",
+            GL_DEBUG_SOURCE_APPLICATION => "APPLICATION",
+            GL_DEBUG_SOURCE_OTHER => "OTHER",
+            else => unreachable,
+        },
+        switch (@"type") {
+            GL_DEBUG_TYPE_ERROR => "ERROR",
+            GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR => "DEPRECATED_BEHAVIOR",
+            GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR => "UNDEFINED_BEHAVIOR",
+            GL_DEBUG_TYPE_PORTABILITY => "PORTABILITY",
+            GL_DEBUG_TYPE_PERFORMANCE => "PERFORMANCE",
+            GL_DEBUG_TYPE_MARKER => "MARKER",
+            GL_DEBUG_TYPE_OTHER => "OTHER",
+            else => unreachable,
+        },
+        switch (severity) {
+            GL_DEBUG_SEVERITY_NOTIFICATION => "NOTIFICATION",
+            GL_DEBUG_SEVERITY_LOW => "LOW",
+            GL_DEBUG_SEVERITY_MEDIUM => "MEDIUM",
+            GL_DEBUG_SEVERITY_HIGH => "HIGH",
+            else => unreachable,
+        },
+        id,
+        @ptrCast([*]const u8, message)[0..@intCast(usize, length)],
+    });
 }
 
 pub fn main() !void {
@@ -330,6 +520,8 @@ pub fn main() !void {
     const dc = try user32.getDC(hwnd);
     _ = try createContext(dc);
     std.debug.print("GL Version: {s}\n", .{c.glGetString(c.GL_VERSION)});
+    c.glEnable(GL_DEBUG_OUTPUT);
+    gl.DebugMessageCallback(glDebugCallback, null);
 
     var shader = Shader.init(&[_]Shader.Module{
         .{
@@ -345,8 +537,8 @@ pub fn main() !void {
     // const dist = 20.0;
     // const projection = comptime Matrix(4, 4, f32).orthographic(0.0, 16.0, 0.0, 9.0, -dist, dist);
     const projection = comptime Matrix(4, 4, f32).perspective(std.math.pi / 2.0, 800.0 / 600.0, 0.1, 100.0);
-    const view = comptime Matrix(4, 4, f32).I().translate(.{ 0.0, 0.0, -10.0 });
-    const model = comptime Matrix(4, 4, f32).I().scale(.{ 10.0, 10.0, 0.0 });
+    const view = comptime Matrix(4, 4, f32).translate(.{ 0.0, 0.0, -10.0 });
+    const model = comptime Matrix(4, 4, f32).scale(.{ 10.0, 10.0, 0.0 });
     shader.uploadMat4("mvp", projection.mul(view.mul(model)));
 
     const Vertex = struct {
@@ -354,7 +546,7 @@ pub fn main() !void {
         color: @Vector(4, f32),
     };
 
-    const vertices = &[_]Vertex{
+    const vertices = [_]Vertex{
         .{
             .position = .{ 0.5, 0.5, 0.0 },
             .color = .{ 1.0, 0.0, 0.0, 1.0 },
@@ -373,36 +565,11 @@ pub fn main() !void {
         },
     };
 
-    const indices = &[_]u16{
+    const indices = [_]u16{
         0, 1, 2, 2, 3, 0,
     };
 
-    const VAO = blk: {
-        var result: [1]c.GLuint = undefined;
-        gl.CreateVertexArrays(1, &result);
-        break :blk result[0];
-    };
-
-    const VBO = blk: {
-        var result: [1]c.GLuint = undefined;
-        gl.CreateBuffers(1, &result);
-        break :blk result[0];
-    };
-    gl.NamedBufferData(VBO, @sizeOf(u16) * indices.len + @sizeOf(Vertex) * vertices.len, null, GL_STATIC_DRAW);
-    gl.NamedBufferSubData(VBO, 0, @sizeOf(u16) * indices.len, indices);
-    gl.NamedBufferSubData(VBO, @sizeOf(u16) * indices.len, @sizeOf(Vertex) * vertices.len, vertices);
-
-    gl.VertexArrayElementBuffer(VAO, VBO);
-
-    gl.VertexArrayVertexBuffer(VAO, 0, VBO, @sizeOf(u16) * indices.len, @sizeOf(Vertex));
-
-    gl.VertexArrayAttribFormat(VAO, 0, 3, c.GL_FLOAT, c.GL_FALSE, @offsetOf(Vertex, "position"));
-    gl.EnableVertexArrayAttrib(VAO, 0);
-    gl.VertexArrayAttribBinding(VAO, 0, 0);
-
-    gl.VertexArrayAttribFormat(VAO, 1, 4, c.GL_FLOAT, c.GL_FALSE, @offsetOf(Vertex, "color"));
-    gl.EnableVertexArrayAttrib(VAO, 1);
-    gl.VertexArrayAttribBinding(VAO, 1, 0);
+    const VAO = VertexArray.init(Vertex, u16, &vertices, &indices);
 
     // c.glPolygonMode(c.GL_FRONT_AND_BACK, c.GL_LINE);
     gl.ClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE);
@@ -425,9 +592,9 @@ pub fn main() !void {
         }
         c.glClearColor(0.15, 0.15, 0.15, 1.0);
         c.glClear(c.GL_COLOR_BUFFER_BIT);
-        shader.bind();
-        gl.BindVertexArray(VAO);
-        c.glDrawElements(c.GL_TRIANGLES, indices.len, c.GL_UNSIGNED_SHORT, null);
+        shader.use();
+        VAO.bind();
+        c.glDrawElements(c.GL_TRIANGLES, VAO.draw_count, VAO.index_type, @intToPtr(?*const c.GLvoid, VAO.indices_offset));
         if (!gdi32.SwapBuffers(dc)) break :game_loop;
     }
 }
