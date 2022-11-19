@@ -6,6 +6,8 @@ pub fn build(b: *std.build.Builder) void {
 
     const exe = b.addExecutable("deadzone", "src/main.zig");
     exe.linkLibC();
+    exe.addIncludePath("stb_image");
+    exe.addCSourceFile("stb_image/stb_image.c", &[_][]const u8{"-std=c99"});
     exe.linkSystemLibrary("opengl32");
     exe.setTarget(target);
     exe.setBuildMode(mode);

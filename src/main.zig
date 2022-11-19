@@ -1,5 +1,9 @@
 const std = @import("std");
-const c = @cImport(@cInclude("GL/gl.h"));
+const c = @cImport({
+    @cDefine("STBI_ONLY_PNG", {});
+    @cInclude("stb_image.h");
+    @cInclude("GL/gl.h");
+});
 const windows = std.os.windows;
 const user32 = windows.user32;
 const gdi32 = windows.gdi32;
@@ -296,13 +300,14 @@ pub const Shader = struct {
 pub const Renderable2D = struct {
     position: @Vector(3, f32),
     size: @Vector(2, f32),
-    color: @Vector(4, f32),
+    color: @Vector(4, u8),
 };
 
 pub const Batch2DRenderer = struct {
     const VertexData = struct {
         position: @Vector(3, f32),
-        color: @Vector(4, f32),
+        color: @Vector(4, u8),
+        texcoord: @Vector(2, f32),
     };
 
     const max_sprites = 10000;
@@ -343,10 +348,10 @@ pub const Batch2DRenderer = struct {
 
     pub fn submit(self: *Batch2DRenderer, renderable: *const Renderable2D) void {
         std.mem.copy(VertexData, self.vertices.?[@intCast(usize, self.vao.draw_count * 4)..vertices_len], &[_]VertexData{
-            .{ .position = .{ renderable.position[0] + 0.0, renderable.position[1] + 0.0, 0.0 }, .color = renderable.color },
-            .{ .position = .{ renderable.position[0] + 0.0, renderable.position[1] + renderable.size[1], 0.0 }, .color = renderable.color },
-            .{ .position = .{ renderable.position[0] + renderable.size[0], renderable.position[1] + renderable.size[1], 0.0 }, .color = renderable.color },
-            .{ .position = .{ renderable.position[0] + renderable.size[0], renderable.position[1] + 0.0, 0.0 }, .color = renderable.color },
+            .{ .position = .{ renderable.position[0] + 0.0, renderable.position[1] + 0.0, 0.0 }, .color = renderable.color, .texcoord = .{ 0.0, 0.0 } },
+            .{ .position = .{ renderable.position[0] + 0.0, renderable.position[1] + renderable.size[1], 0.0 }, .color = renderable.color, .texcoord = .{ 0.0, 1.0 } },
+            .{ .position = .{ renderable.position[0] + renderable.size[0], renderable.position[1] + renderable.size[1], 0.0 }, .color = renderable.color, .texcoord = .{ 1.0, 1.0 } },
+            .{ .position = .{ renderable.position[0] + renderable.size[0], renderable.position[1] + 0.0, 0.0 }, .color = renderable.color, .texcoord = .{ 1.0, 0.0 } },
         });
         self.vao.draw_count += 1;
     }
@@ -429,11 +434,13 @@ pub const VertexArray = struct {
                         8 => c.GL_BYTE,
                         16 => c.GL_SHORT,
                         32 => c.GL_INT,
+                        else => unreachable,
                     },
-                    .unsigned => switch (i.bits) {
+                    .unsigned => switch (int.bits) {
                         8 => c.GL_UNSIGNED_BYTE,
                         16 => c.GL_UNSIGNED_SHORT,
                         32 => c.GL_UNSIGNED_INT,
+                        else => unreachable,
                     },
                 },
                 .Float => |float| switch (float.bits) {
@@ -444,7 +451,14 @@ pub const VertexArray = struct {
                 .Bool => c.GL_BYTE,
                 inline else => unreachable,
             };
-            gl.VertexArrayAttribFormat(result.vaobj, i, len, gltype, c.GL_FALSE, @offsetOf(VertexType, field.name));
+            const normalized = switch (singletype) {
+                .Int => |int| switch (int.bits) {
+                    8 => c.GL_TRUE,
+                    else => c.GL_FALSE,
+                },
+                else => c.GL_FALSE,
+            };
+            gl.VertexArrayAttribFormat(result.vaobj, i, len, gltype, normalized, @offsetOf(VertexType, field.name));
             gl.EnableVertexArrayAttrib(result.vaobj, i);
             gl.VertexArrayAttribBinding(result.vaobj, i, 0);
         }
@@ -463,6 +477,36 @@ pub const VertexArray = struct {
     pub fn unbind(self: VertexArray) void {
         _ = self;
         gl.BindVertexArray(0);
+    }
+};
+
+pub const Texture = struct {
+    texid: c.GLuint,
+    path: []const u8,
+
+    pub fn init(path: []const u8) Texture {
+        var result: Texture = .{
+            .texid = blk: {
+                var id: [1]c.GLuint = undefined;
+                gl.CreateTextures(c.GL_TEXTURE_2D, 1, &id);
+                break :blk id[0];
+            },
+            .path = path,
+        };
+        var width: i32 = undefined;
+        var height: i32 = undefined;
+        var num_channels: i32 = undefined;
+        var data = c.stbi_load("test.png", &width, &height, &num_channels, 0);
+        if (data) |d| {
+            gl.TextureStorage2D(result.texid, 1, c.GL_RGBA8, width, height);
+            gl.TextureSubImage2D(result.texid, 0, 0, 0, width, height, c.GL_RGB, c.GL_UNSIGNED_BYTE, data);
+            c.stbi_image_free(d);
+        }
+        return result;
+    }
+
+    pub fn bind(self: Texture, unit: u32) void {
+        gl.BindTextureUnit(unit, self.texid);
     }
 };
 
@@ -558,6 +602,17 @@ pub fn Matrix(comptime w: comptime_int, comptime h: comptime_int, comptime Eleme
                 inline while (i < 3) : (i += 1) {
                     result.data[3][i] = by[i];
                 }
+                return result;
+            }
+
+            pub fn rotateZ(by: Element) Self {
+                var result = Self.I();
+                const cosa = @cos(by);
+                const sina = @sin(by);
+                result.data[0][0] = cosa;
+                result.data[1][0] = sina;
+                result.data[0][1] = -sina;
+                result.data[1][1] = cosa;
                 return result;
             }
 
@@ -659,15 +714,18 @@ pub fn main() !void {
     }
     Shader.loaded_shaders.deinit();
 
+    c.stbi_set_flip_vertically_on_load(1);
+    const t1 = Texture.init("test.png");
+
     const dist = 20.0;
     const projection = comptime Matrix(4, 4, f32).orthographic(0.0, 16.0, 0.0, 9.0, -dist, dist);
     // const projection = comptime Matrix(4, 4, f32).perspective(std.math.pi / 2.0, 800.0 / 600.0, 0.1, 100.0);
     const view = comptime Matrix(4, 4, f32).translate(.{ 0.0, 0.0, -10.0 });
-    const model = comptime Matrix(4, 4, f32).scale(.{ 1.0, 1.0, 1.0 });
-    shader.uploadMat4("mvp", projection.mul(view.mul(model)));
+    const model = comptime Matrix(4, 4, f32).I();
+    shader.uploadMat4("mvp", comptime projection.mul(view.mul(model)));
 
-    const sprite1 = Renderable2D{ .position = .{ 5.0, 5.0, 0.0 }, .size = .{ 4.0, 4.0 }, .color = .{ 1.0, 0.0, 1.0, 1.0 } };
-    const sprite2 = Renderable2D{ .position = .{ 7.0, 1.0, 0.0 }, .size = .{ 2.0, 3.0 }, .color = .{ 0.2, 0.0, 1.0, 1.0 } };
+    const sprite1 = Renderable2D{ .position = .{ 5.0, 5.0, 0.0 }, .size = .{ 4.0, 4.0 }, .color = .{ 255, 0, 255, 255 } };
+    const sprite2 = Renderable2D{ .position = .{ 7.0, 1.0, 0.0 }, .size = .{ 2.0, 3.0 }, .color = .{ @floatToInt(u8, 255.0 * 0.2), 0, 255, 255 } };
     var renderer = Batch2DRenderer.init();
 
     // c.glPolygonMode(c.GL_FRONT_AND_BACK, c.GL_LINE);
@@ -705,9 +763,10 @@ pub fn main() !void {
 
         lightpos[0] = 8.0 * @sin(running) + 8.0;
         shader.uploadVec2("u_lightpos", lightpos);
+        t1.bind(0);
         shader.use();
         renderer.begin();
-        const every = 0.125;
+        const every = 0.5;
         const size = 1.0 - every;
         var x: f32 = 0.0;
         var r = std.rand.DefaultPrng.init(42);
@@ -718,7 +777,7 @@ pub fn main() !void {
                 renderer.submit(&Renderable2D{
                     .position = .{ x, y, 0.0 },
                     .size = .{ size, size },
-                    .color = .{ rr.float(f32), 0.0, rr.float(f32), 1.0 },
+                    .color = .{ rr.uintAtMost(u8, 255), 0, rr.uintAtMost(u8, 255), 255 },
                 });
             }
         }
