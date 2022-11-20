@@ -290,11 +290,6 @@ pub const Shader = struct {
     pub fn uploadMat4(self: Shader, location: [:0]const u8, value: Matrix(4, 4, f32)) void {
         gl.ProgramUniformMatrix4fv(self.program, gl.GetUniformLocation(self.program, location), 1, c.GL_FALSE, @ptrCast(*const [16]f32, &value.data));
     }
-
-    pub fn unuse(self: Shader) void {
-        _ = self;
-        gl.UseProgram(0);
-    }
 };
 
 pub const Renderable2D = struct {
@@ -472,11 +467,6 @@ pub const VertexArray = struct {
 
     pub fn bind(self: VertexArray) void {
         gl.BindVertexArray(self.vaobj);
-    }
-
-    pub fn unbind(self: VertexArray) void {
-        _ = self;
-        gl.BindVertexArray(0);
     }
 };
 
